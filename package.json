@@ -1,6 +1,6 @@
 {
     "name": "tool-data-dimension-disabler",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "Rank categories and group sets that are enabled as data dimensions by how often favorites using them are viewed, and disable the unused ones",
     "license": "BSD-3-Clause",
     "private": true,
