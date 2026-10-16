@@ -12,7 +12,7 @@ export const Intro = () => (
         </p>
         <p>
             {i18n.t(
-                'Favorites that use a disabled dimension stop working and section forms lose their subtotals, so check before disabling. A dimension can be re-enabled at any time in the Maintenance app.'
+                'Favorites that use a disabled dimension stop working, and data set reports show empty sub-totals for a disabled category (the Data set reports column lists which), so check before disabling. A dimension can be re-enabled at any time in the Maintenance app.'
             )}
         </p>
     </details>

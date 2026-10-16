@@ -14,6 +14,10 @@ export type UsageRow = {
     views: number
     percent: number
     percentOfViews: number
+    /** Data sets whose data set report shows sub-totals for this category (always 0 for group sets) */
+    dataSetReports: number
+    /** Names of those data sets, sorted */
+    dataSetReportNames: string[]
 }
 
 export type ListGrid = {
@@ -36,6 +40,16 @@ const toNumber = (value: string | number | null | undefined): number => {
     return Number.isFinite(parsed) ? parsed : 0
 }
 
+/** The view sends the names as a JSON array in a text column. */
+const toStringList = (value: string | number | null | undefined): string[] => {
+    try {
+        const parsed: unknown = JSON.parse(String(value ?? '[]'))
+        return Array.isArray(parsed) ? parsed.map(String) : []
+    } catch {
+        return []
+    }
+}
+
 // Column names, in the order buildQuery.ts's SELECT emits them - kept as
 // named constants (rather than repeating the string literals below) so a
 // column rename in one place can't drift from the other without a compiler
@@ -51,6 +65,8 @@ const [
     VIEWS,
     PERCENT,
     PERCENT_OF_VIEWS,
+    DATA_SET_REPORTS,
+    DATA_SET_REPORT_NAMES,
 ] = SQL_VIEW_COLUMNS
 
 /** Map SQL view grid rows to typed rows, looking columns up by header name. */
@@ -81,6 +97,10 @@ export const parseUsageRows = (grid: ListGrid | undefined): UsageRow[] => {
                 views: toNumber(column(row, VIEWS)),
                 percent: toNumber(column(row, PERCENT)),
                 percentOfViews: toNumber(column(row, PERCENT_OF_VIEWS)),
+                dataSetReports: toNumber(column(row, DATA_SET_REPORTS)),
+                dataSetReportNames: toStringList(
+                    column(row, DATA_SET_REPORT_NAMES)
+                ),
             },
         ]
     })

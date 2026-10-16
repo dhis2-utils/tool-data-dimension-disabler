@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Record favorite view events on a DHIS2 instance so the usage ranking is
 # non-trivial when testing. Usage:
-#   scripts/generate-view-events.sh http://dhis2-agent-cdd-sl43:8080 admin:district
+#   scripts/generate-view-events.sh http://localhost:8080 <user:password>
+# Writes usage statistics: use a throwaway instance, never a server whose
+# statistics matter.
 # Records N views per favorite, where N decreases along the list, for the
 # first 5 visualizations, 3 maps and 3 event visualizations that actually use
 # at least one of the four dimension types this app ranks -- a favorite that
@@ -14,7 +16,7 @@
 # through 2.43. jq then keeps only the favorites whose dimension sizes sum to
 # more than 0.
 set -euo pipefail
-BASE="${1:?base url}"; AUTH="${2:-admin:district}"
+BASE="${1:?base url}"; AUTH="${2:?user:password}"
 
 record() { # eventType uid count
     local event_type="$1" favorite="$2" views="$3"

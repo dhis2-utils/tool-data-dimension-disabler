@@ -14,10 +14,13 @@ jobs:
         steps:
             - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
+            - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+
+            # No dependency cache: this job holds a write token, and whatever a
+            # poisoned cache delivers would run with it (RELEASE-WORKFLOW.md).
             - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
               with:
                   node-version: 22
-                  cache: yarn
 
             # Warn, never fail: a wrong release can be deleted and recreated, but a
             # protected tag cannot be moved, so exiting here would burn the version.
@@ -32,10 +35,10 @@ jobs:
             - name: Install dependencies
               # --ignore-scripts: dependency lifecycle scripts are not needed to
               # build this app and running them would execute third-party code in CI.
-              run: yarn install --frozen-lockfile --ignore-scripts
+              run: pnpm install --frozen-lockfile --ignore-scripts
 
             - name: Build
-              run: yarn build
+              run: pnpm run build
 
             - name: Extract changelog section
               # Tags are protected: they cannot be deleted or moved. So a missing
@@ -57,10 +60,16 @@ jobs:
                   fi
 
             - name: Create GitHub release
+              # A re-run after a transient failure finds the release an earlier
+              # attempt created; upload to it instead of failing on "already exists".
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
-                  gh release create "$GITHUB_REF_NAME" \
-                    --title "$GITHUB_REF_NAME" \
-                    --notes-file release-notes.md \
-                    build/bundle/*.zip
+                  if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+                    gh release upload "$GITHUB_REF_NAME" --clobber build/bundle/*.zip
+                  else
+                    gh release create "$GITHUB_REF_NAME" \
+                      --title "$GITHUB_REF_NAME" \
+                      --notes-file release-notes.md \
+                      build/bundle/*.zip
+                  fi

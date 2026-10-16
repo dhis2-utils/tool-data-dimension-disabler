@@ -27,6 +27,17 @@
     font-variant-numeric: tabular-nums;
 }
 
+.hasDetails {
+    cursor: help;
+    text-decoration: underline dotted;
+    text-underline-offset: 3px;
+}
+
+.detailList {
+    margin: 0;
+    padding-inline-start: var(--spacers-dp16);
+}
+
 .actionCell {
     padding-inline: var(--spacers-dp12);
 }

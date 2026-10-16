@@ -1,7 +1,7 @@
 """Browser-side helpers: locating the app, its widgets, and its console output.
 
 The app is driven as installed on the instance
-(`<base>/api/apps/data-dimension-disabler/index.html`). From DHIS2 2.42 the
+(`<base>/api/apps/<app key>/index.html`). From DHIS2 2.42 the
 server wraps that URL in the global-shell iframe, while 2.40/2.41 serve it at
 top level, so every locator goes through `app_frame()`.
 """
@@ -11,7 +11,7 @@ import time
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
-APP_PATH = "/api/apps/data-dimension-disabler/index.html"
+APP_PATH = "/api/apps/{key}/index.html"
 
 # Selectors (module constants: they repeat across flows)
 # The app renders no <h1> of its own (the header bar carries the app name),
@@ -105,9 +105,10 @@ class ConsoleRecorder:
         ]
 
 
-def open_app(page, base_url):
+def open_app(page, base_url, app_key):
     """Navigate to the installed app and return its frame."""
-    page.goto(f"{base_url.rstrip('/')}{APP_PATH}", wait_until="domcontentloaded")
+    path = APP_PATH.format(key=app_key)
+    page.goto(f"{base_url.rstrip('/')}{path}", wait_until="domcontentloaded")
     return app_frame(page)
 
 

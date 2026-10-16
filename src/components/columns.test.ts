@@ -21,7 +21,7 @@ const memoryStorage = (initial: Record<string, string> = {}): Storage => {
 }
 
 describe('columns', () => {
-    it('lists the ten columns in display order with type and name always visible', () => {
+    it('lists the eleven columns in display order with type and name always visible', () => {
         expect(COLUMN_DEFS.map((c) => c.key)).toEqual([
             'type',
             'name',
@@ -33,6 +33,7 @@ describe('columns', () => {
             'views',
             'percent',
             'percentOfViews',
+            'dataSetReports',
         ])
         expect(
             COLUMN_DEFS.filter((c) => c.alwaysVisible).map((c) => c.key)
@@ -54,6 +55,7 @@ describe('columns', () => {
             'favorites',
             'views',
             'percent',
+            'dataSetReports',
         ])
     })
 

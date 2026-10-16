@@ -104,13 +104,12 @@ selection batches (visualizations, maps, event visualizations) plus a new
   - `fetch`'s warning path tested directly against a nonexistent endpoint on
     the live instance below - printed the expected `warning: GET ... -> HTTP
     404: ...` to stderr and returned `{}`.
-  - **Live run** against `http://dhis2-agent-cdd-emis41:8080` (DHIS2
-    2.41.10, the instance that came up during this task - `agent-cdd-sl43`,
-    the instance named in the task brief, stayed stopped throughout and was
-    not started):
+  - **Live run** against a 2.41.10 instance with the DHIS2 for Education
+    (EMIS) metadata, at `http://localhost:8080` (the Sierra Leone 2.43.1
+    instance was not used for this run):
 
     ```
-    $ ./scripts/generate-view-events.sh http://dhis2-agent-cdd-emis41:8080 admin:district
+    $ ./scripts/generate-view-events.sh http://localhost:8080 admin:district
     visualizations: 0/0 favorites carry a dimension
     maps: 0/0 favorites carry a dimension
     event_visualizations: 17/125 favorites carry a dimension

@@ -17,6 +17,8 @@ const row: UsageRow = {
     views: 3,
     percent: 1,
     percentOfViews: 1,
+    dataSetReports: 0,
+    dataSetReportNames: [],
 }
 
 describe('DisableDialog', () => {
@@ -85,5 +87,38 @@ describe('DisableDialog', () => {
         )
         expect(screen.getByRole('button', { name: 'Disable' })).toBeDisabled()
         expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
+    })
+
+    it('lists the data sets whose report loses its sub-totals', () => {
+        renderWithProvider(
+            <DisableDialog
+                row={{
+                    ...row,
+                    type: 'CATEGORY',
+                    dataSetReports: 2,
+                    dataSetReportNames: ['Child Health', 'Reproductive Health'],
+                }}
+                loading={false}
+                onConfirm={jest.fn()}
+                onCancel={jest.fn()}
+            />
+        )
+        expect(
+            screen.getByTestId('disable-dialog-data-sets')
+        ).toHaveTextContent('Child HealthReproductive Health')
+    })
+
+    it('does not mention data set reports when no report is affected', () => {
+        renderWithProvider(
+            <DisableDialog
+                row={row}
+                loading={false}
+                onConfirm={jest.fn()}
+                onCancel={jest.fn()}
+            />
+        )
+        expect(
+            screen.queryByTestId('disable-dialog-data-sets')
+        ).not.toBeInTheDocument()
     })
 })

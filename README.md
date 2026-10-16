@@ -1,10 +1,10 @@
-# Data Dimension Disabler
+# Data Dimension Disabler Tool
 
 > ![Maturity: Validated](https://img.shields.io/badge/maturity-Validated-yellow)  
 > Intended use: review use of data dimensions in favourites and analytics, to quickly disable those that are not used.  
 > Maintainers: HISP Centre implementation team.
->
-> **WARNING**  
+
+> [!WARNING]
 > This tool is intended to be used by system administrators, not end users. It is available as a DHIS2 app, but has not been through the same rigorous testing as normal core apps. It should be used with care, and always tested in a development environment.
 
 ## License
@@ -30,7 +30,8 @@ or event visualizations. Dimensions with no or very few views are good
 candidates for disabling. The app lets an admin disable a dimension directly
 from the table, with a confirmation dialog that explains the consequence:
 favorites that use a disabled dimension stop working until it is re-enabled,
-and section forms lose their subtotals for it. A dimension can always be
+and data set reports with section or default forms show empty sub-totals for
+a disabled category (see [Data set reports](#data-set-reports)). A dimension can always be
 re-enabled again in the Maintenance app, so try changes on a test system
 first.
 
@@ -87,6 +88,55 @@ overall system activity, not just relative to other dimensions. These
 definitions, and those of the other numeric columns, are also available in
 the app itself: hover the ⓘ icon in a column header.
 
+### Data set reports
+
+A category can matter outside favorites too: data set reports use it for
+their **sub-totals**. When a data element's category combination has more
+than one category (for example Age and Sex), the report adds a sub-total
+column per category option ("Female", "Male", "<5y", …) next to the
+values and the grand total. Each sub-total is an analytics query grouped by
+that category, and DHIS2 skips the query when the category is not a data
+dimension: the column stays, but its cells are empty. Grand totals and the
+values themselves group by category option combination and are not
+affected.
+
+The **Data set reports** column counts, per category, the data sets whose
+report shows such sub-totals, and hovering the number lists them. The rules
+follow the DHIS2 core code for 2.40–2.43 (`DefaultDataSetReportService`,
+`AnalyticsDataSetReportStore`):
+
+- **Section and default forms only.** A custom form's report fills the form
+  with values, data element totals and indicator values, none of which
+  depend on the flag; a custom form has no field for a per-option sub-total.
+- A **section form** shows only the data elements placed in its sections; a
+  **default form** shows every data element of the data set.
+- The category combination is the data set's override for that data element
+  when one is set, otherwise the data element's own.
+- There is **no setting** that turns sub-totals off: they appear for every
+  combination with more than one category. The section's "show row/column
+  totals" options and the combination's "skip total" only affect data entry
+  and the grand total.
+- Only numeric and boolean data elements with an aggregation type analytics
+  can aggregate are counted. (DHIS2 also queries sub-totals for text data
+  elements, but a sub-total of text values is not a total anyone reads.)
+
+Group sets never affect data set report sub-totals, so their rows show a
+dash. The disable dialog for a category lists the affected data sets.
+
+Two related effects are deliberately not counted:
+
+- **The report's filter.** A data set report can be filtered by the data
+  set's attribute categories and the category option group sets reached
+  through them (the list comes from `/api/dimensions/dataSet/{uid}`).
+  Filtering needs the analytics column, so once one of those is disabled it
+  can no longer be used as a filter there.
+- **How often data set reports are opened.** DHIS2 has a
+  `DATA_SET_REPORT_VIEW` usage event, but the Reports app does not record it
+  ([DHIS2-17175](https://dhis2.atlassian.net/browse/DHIS2-17175), open as of
+  October 2026): on the Sierra Leone 2.43 demo the newest such event dates
+  from 2016. A view count would read zero everywhere, so the column counts
+  data sets rather than report views.
+
 The view is created with `public: 'r-r-----'` sharing (metadata read plus
 data read; the `/sqlViews/{uid}/data` endpoint that returns the ranked rows
 requires data read specifically). It can be removed again from within the
@@ -96,8 +146,10 @@ app at any time — the app offers to recreate it the next time it is opened.
 
 The **Manage view** button above the table shows or hides any column except Type
 and Name, which are always shown. The table starts with Type, Name, UID,
-Favorites, Views and "% of dimension views"; Public, Shared, Private and
-"% of favorite views" start hidden. The choice is remembered in the browser's
+Favorites, Views, "% of dimension views" and Data set reports; Public,
+Shared, Private and "% of favorite views" start hidden. A browser that
+saved a column choice before the Data set reports column existed keeps that
+choice, so the new column has to be ticked there once. The choice is remembered in the browser's
 `localStorage` (key `data-dimension-disabler.columns`), so it is per browser
 and per user, not a server-side setting: it survives a reload but does not
 follow the user to another machine.
@@ -117,32 +169,68 @@ follow the user to another machine.
   sharing makes the data endpoint answer `409 E4312` ("Current user is not
   authorised to read data from SQL view") regardless of that authority.
 - On DHIS2 2.42 and later, the global app shell also requires the
-  server-generated **M_datadimensiondisabler** authority to open the app at
+  server-generated **M_tooldatadimensiondisabler** authority to open the app at
   all — without it, the shell answers "Unable to find an app for this URL".
 
 ## Compatibility
 
 DHIS2 2.40 to 2.43.
 
+## Known limitations
+
+- Usage is what DHIS2 records in its usage statistics: favorites opened in
+  the Data Visualizer, Maps and Line Listing/Event apps. Analytics requests
+  from scripts, integrations or other apps that use a dimension leave no
+  trace there, so a dimension they depend on can still rank as unused.
+- Data set report views are not counted, because DHIS2 does not record them
+  (see [Data set reports](#data-set-reports)).
+- Only dimensions that are currently enabled are listed. A data set report
+  that already shows empty sub-totals because a category was disabled
+  earlier is not reported.
+- The data set report column counts numeric and boolean data elements only.
+
 ## Development
 
+Develop against a local DHIS2 instance you can throw away: the app disables
+data dimensions, which affects every favorite and data set report that uses
+them. The DHIS2 core repository's
+[Docker Compose setup](https://github.com/dhis2/dhis2-core#run-dhis2-in-docker)
+starts one with the Sierra Leone demo database at `http://localhost:8080`.
+
 ```
-yarn install
-yarn start --proxy https://play.im.dhis2.org/dev-2-43
-yarn test
-yarn lint
-yarn build        # bundle in build/bundle/
+pnpm install
+pnpm start --proxy http://localhost:8080
+pnpm test
+pnpm lint
+pnpm build        # bundle in build/bundle/
 ```
 
-`scripts/generate-view-events.sh <base-url> [user:password]` records
-favorite-view events against a test instance, so the ranking has non-trivial
-data to show while developing.
+`scripts/generate-view-events.sh <base-url> <user:password>` records
+favorite-view events on that instance, so the ranking has non-trivial data to
+show while developing. The end-to-end suite is described in
+[e2e/README.md](e2e/README.md).
+
+## Upgrading to the tool-data-dimension-disabler key
+
+From the next release the app's key is `tool-data-dimension-disabler`
+(previously `data-dimension-disabler`), and its name is "Data Dimension
+Disabler Tool". DHIS2 treats it as a different app:
+
+1. Install the new version, then uninstall the old "Data Dimension Disabler"
+   in App Management right away. Otherwise two entries remain in the menu,
+   and the two apps keep offering to "update" the shared SQL view to their
+   own version; the old app's update removes the Data set reports column.
+2. Add the new app to every user role that gave access to the old one. Until
+   then, users without the ALL authority cannot open it.
+3. Bookmarks to the old app URL stop working.
+
+The SQL view is shared by both, so no usage data is lost.
 
 ## Upgrading from Category dimension disabler
 
 Installing this app does not automatically remove or replace the old
 "Category dimension disabler" app — uninstall it yourself after installing
-Data Dimension Disabler. The old app's SQL view is detected on startup and
+Data Dimension Disabler Tool. The old app's SQL view is detected on startup and
 updated in place (same UID, new name and content), so no usage history or
 manual re-configuration is needed; it is not created a second time under a
 new UID.

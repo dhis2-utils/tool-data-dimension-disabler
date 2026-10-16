@@ -13,6 +13,8 @@ const rows: UsageRow[] = [
         views: 5,
         percent: 50,
         percentOfViews: 25,
+        dataSetReports: 0,
+        dataSetReportNames: [],
     },
     {
         type: 'ORGUNIT_GROUP_SET',
@@ -25,6 +27,8 @@ const rows: UsageRow[] = [
         views: 10,
         percent: 40,
         percentOfViews: 20,
+        dataSetReports: 0,
+        dataSetReportNames: [],
     },
     {
         type: 'CATEGORY',
@@ -37,6 +41,8 @@ const rows: UsageRow[] = [
         views: 0,
         percent: 0,
         percentOfViews: 0,
+        dataSetReports: 0,
+        dataSetReportNames: [],
     },
 ]
 

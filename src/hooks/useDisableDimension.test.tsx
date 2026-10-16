@@ -16,6 +16,8 @@ const row: UsageRow = {
     views: 0,
     percent: 0,
     percentOfViews: 0,
+    dataSetReports: 0,
+    dataSetReportNames: [],
 }
 
 const wrapperWith =

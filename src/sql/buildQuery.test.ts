@@ -130,9 +130,49 @@ describe('buildQuery', () => {
             'views',
             'percent',
             'percent_of_views',
+            'data_set_reports',
+            'data_set_report_names',
         ])
         expect(selectLine).toMatch(
-            /SELECT s\.type, s\.uid, s\.name,\s+s\.favorites, s\.public_favorites, s\.shared_favorites, s\.private_favorites,\s+s\.views,[\s\S]*AS percent,[\s\S]*AS percent_of_views/
+            /SELECT s\.type, s\.uid, s\.name,\s+s\.favorites, s\.public_favorites, s\.shared_favorites, s\.private_favorites,\s+s\.views,[\s\S]*AS percent,[\s\S]*AS percent_of_views,\s+s\.data_set_reports, s\.data_set_report_names\s+FROM/
+        )
+    })
+
+    it('counts data set report sub-totals for categories only', () => {
+        for (const minor of [40, 43]) {
+            const sql = buildQuery(minor)
+            expect(sql).toContain('data_set_report_subtotals AS (')
+            expect(
+                sql.match(/LEFT JOIN data_set_report_subtotals dsr/g)
+            ).toHaveLength(1)
+            expect(sql).toContain(
+                'LEFT JOIN data_set_report_subtotals dsr ON dsr.categoryid = z.categoryid'
+            )
+            expect(sql.match(/0 AS data_set_reports/g)).toHaveLength(
+                DIMENSION_TYPE_KEYS.length - 1
+            )
+        }
+    })
+
+    it('mirrors the data set report rules for sub-totals', () => {
+        const sql = buildQuery(43)
+        // custom forms never show sub-totals
+        expect(sql).toContain('WHERE ds.dataentryform IS NULL')
+        // the data set element's combo override wins over the data element's
+        expect(sql).toContain(
+            'cc.categorycomboid = COALESCE(dse.categorycomboid, de.categorycomboid)'
+        )
+        // a combo shows sub-totals only with more than one category
+        expect(sql).toMatch(
+            /\(SELECT COUNT\(\*\) FROM categorycombos_categories n\s+WHERE n\.categorycomboid = cc\.categorycomboid\) > 1/
+        )
+        // section forms show only the data elements placed in a section
+        expect(sql).toContain(
+            'JOIN sectiondataelements sde ON sde.sectionid = s.sectionid'
+        )
+        expect(sql).toContain("de.valuetype IN ('NUMBER',")
+        expect(sql).toContain(
+            "de.aggregationtype NOT IN ('NONE', 'CUSTOM', 'DEFAULT')"
         )
     })
 

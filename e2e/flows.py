@@ -4,23 +4,26 @@ Flows are ordered: the suite starts with no SQL view installed and ends with
 the view installed again and every dimension re-enabled.
 """
 
+import json
 import os
 import re
 import secrets
 import string
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 import app_driver as ui
+import state as run_state
 from dhis2_api import (
-    APP_KEY,
     SQL_VIEW_ID,
     SQL_VIEW_PATH,
     Dhis2Client,
     grid_rows,
     hostname_of,
 )
+from data_set_report_oracle import UnreadableMetadata, data_set_report_names
 from favorite_counts_sql import favorite_counts, UnreadableFavorites
 from legacy_sql_view import LEGACY_NAME, legacy_definition
 
@@ -49,7 +52,18 @@ TYPE_ENDPOINTS = {
     "CATEGORYOPTION_GROUP_SET": "categoryOptionGroupSets",
 }
 
-DEFAULT_COLUMNS = ("type", "name", "uid", "favorites", "views", "percent")
+DEFAULT_COLUMNS = (
+    "type",
+    "name",
+    "uid",
+    "favorites",
+    "views",
+    "percent",
+    "dataSetReports",
+)
+DATA_SET_REPORTS_COLUMN = "dataSetReports"
+DATA_SET_REPORTS_DETAILS = f"[data-test='usage-cell-details-{DATA_SET_REPORTS_COLUMN}']"
+TOOLTIP = "[data-test='dhis2-uicore-tooltip-content']"
 # Column keys shown only after the user asks for them, and the oracle key
 # each of them is cross-checked against.
 SHARING_COLUMNS = {
@@ -59,7 +73,7 @@ SHARING_COLUMNS = {
 }
 FAVORITE_COLUMNS = {"favorites": "favorites", **SHARING_COLUMNS}
 # One chooser entry per column defined in src/components/columns.ts.
-COLUMN_COUNT = 10
+COLUMN_COUNT = 11
 CHOOSER_COLUMN = "privateFavorites"
 CHOOSER_COLUMN_LABEL = "Private"
 CROSSCHECK_ROW_LIMIT = 3
@@ -68,8 +82,6 @@ CROSSCHECK_ROW_LIMIT = 3
 # rounding.
 MAX_HEADER_OFFSET_PX = 13
 
-LIMITED_ROLE_NAME = "cdd-e2e-app-only"
-LIMITED_USERNAME = "cdde2elimited"
 # The suite creates this user and deletes it again, so its password is
 # generated per run and no credential is kept in the repo. DHIS2 requires at
 # least 8 characters including an upper case letter, a digit and a symbol.
@@ -99,16 +111,19 @@ class Context:
     minor: int
     out_dir: Path
     browser: object
-    # Superuser client used to create the throwaway limited user: demo
-    # `admin` accounts often lack ALL and cannot grant an app authority.
-    provisioner: Optional[Dhis2Client] = None
+    # Key the server gave the installed app: its URL and M_ authority.
+    app_key: str = ""
+    # The run record (state.RunState): every change is written to it first.
+    state: object = None
+    # The throwaway non-superuser account, created on first use.
+    limited: Optional[Dhis2Client] = None
     disabled: list = field(default_factory=list)
 
 
 def _frame(ctx):
     """The app frame, opening the app first when the page is elsewhere."""
-    if "data-dimension-disabler" not in (ctx.page.url or ""):
-        return ui.open_app(ctx.page, ctx.base_url)
+    if f"/api/apps/{ctx.app_key}/" not in (ctx.page.url or ""):
+        return ui.open_app(ctx.page, ctx.base_url, ctx.app_key)
     return ui.app_frame(ctx.page)
 
 
@@ -141,7 +156,7 @@ def _click_dialog_button(frame, dialog_selector, name):
 def flow_load_missing(ctx):
     """Check 1a/7/8: fresh load with no view shows the create notice."""
     results = []
-    frame = ui.open_app(ctx.page, ctx.base_url)
+    frame = ui.open_app(ctx.page, ctx.base_url, ctx.app_key)
     title = ui.notice_title(frame)
     results.append(
         (
@@ -237,21 +252,83 @@ def _compare_table_with_api(ctx, frame, api_rows):
         )
     )
 
+    # Not every database enables all four types (the Laos HMIS demo has no
+    # data element group set dimension), so compare with what the server
+    # returned rather than requiring four.
     present = {row["type"] for row in dom_rows}
-    missing = [
-        label for key, label in TYPE_LABELS.items() if key in _api_types(api_rows)
-    ]
-    absent = [label for label in missing if label not in present]
+    returned = {TYPE_LABELS[key] for key in _api_types(api_rows)}
     results.append(
         (
-            "All four dimension types appear in the table",
-            PASS if not absent and len(present) == 4 else FAIL,
-            f"types shown: {sorted(present)}",
+            "Every dimension type the server returns appears in the table",
+            PASS if present == returned else FAIL,
+            f"types shown: {sorted(present)}, returned: {sorted(returned)}",
         )
     )
 
     results.extend(_favorite_column_checks(ctx, frame, api_rows))
+    results.extend(_data_set_report_checks(ctx, frame, api_rows))
     return results
+
+
+def _sql_names(api_row):
+    try:
+        return sorted(json.loads(api_row.get("data_set_report_names") or "[]"))
+    except ValueError:
+        return None
+
+
+def _data_set_report_checks(ctx, frame, api_rows):
+    """Sub-total data sets per category: SQL vs the metadata API, then the UI."""
+    step = "Data set report sub-totals match an independent count from /api/dataSets"
+    try:
+        expected = data_set_report_names(ctx.client)
+    except UnreadableMetadata as error:
+        return [(step, SKIP, str(error))]
+    categories = [row for row in api_rows if row["type"] == "CATEGORY"]
+    mismatches = [
+        f"{row['name']}: view {_sql_names(row)}, API {expected.get(row['uid'], [])}"
+        for row in categories
+        if _sql_names(row) != expected.get(row["uid"], [])
+        or int(row["data_set_reports"]) != len(expected.get(row["uid"], []))
+    ]
+    group_sets_with_counts = [
+        row["name"]
+        for row in api_rows
+        if row["type"] != "CATEGORY" and int(row["data_set_reports"]) != 0
+    ]
+    affected = sum(1 for row in categories if int(row["data_set_reports"]) > 0)
+    results = [
+        (
+            step,
+            PASS if not mismatches and not group_sets_with_counts else FAIL,
+            f"{len(categories)} categories, {affected} with sub-totals"
+            if not mismatches and not group_sets_with_counts
+            else f"mismatches: {mismatches}; group sets with counts: {group_sets_with_counts}",
+        )
+    ]
+    results.append(_data_set_report_tooltip_check(ctx, frame, categories))
+    return results
+
+
+def _data_set_report_tooltip_check(ctx, frame, categories):
+    step = "Hovering a data set report count lists its data sets"
+    target = max(categories, key=lambda row: int(row["data_set_reports"]), default=None)
+    if target is None or int(target["data_set_reports"]) == 0:
+        return (step, SKIP, "no category shows sub-totals in any data set report")
+    row = frame.locator(ui.USAGE_ROW).filter(has_text=target["uid"]).first
+    row.locator(DATA_SET_REPORTS_DETAILS).hover()
+    tooltip = frame.locator(TOOLTIP).first
+    tooltip.wait_for(state="visible", timeout=ui.DEFAULT_TIMEOUT_MS)
+    listed = sorted(
+        item.strip() for item in tooltip.locator("li").all_inner_texts()
+    )
+    _shot(ctx, "02c-data-set-report-tooltip")
+    ctx.page.mouse.move(0, 0)  # close the tooltip before the next flow
+    return (
+        step,
+        PASS if listed == _sql_names(target) else FAIL,
+        f"{target['name']}: {listed}",
+    )
 
 
 def _api_types(api_rows):
@@ -270,7 +347,7 @@ def _favorite_crosscheck(ctx, shown, api_row):
     step = f"Favorite counts match an independent count ({api_row['name']})"
     try:
         counts = favorite_counts(
-            ctx.client, api_row["type"], uid, ctx.minor, ctx.provisioner
+            ctx.client, api_row["type"], uid, ctx.minor, ctx.state
         )
     except UnreadableFavorites as error:
         return (step, SKIP, str(error))
@@ -439,31 +516,58 @@ def flow_filter_and_sort(ctx):
     ui.select_type_filter(frame, "All types")
     _shot(ctx, "03-filter")
 
-    results.extend(_sort_checks(frame))
+    results.extend(_sort_checks(frame, [row["name"] for row in api_rows]))
     _shot(ctx, "04-sorted")
     return results
 
 
-def _sort_checks(frame):
+# The app compares names with the browser's localeCompare (ICU collation,
+# base sensitivity), which orders punctuation differently from Python's
+# str.lower: "Age (<1- 30+ years)" sorts before "Age (0-59 months)". So the
+# expected order comes from the same browser. It sorts the raw names from the
+# API, as the app does: the table's rendered text collapses runs of spaces
+# (the Laos database has "Age in years  (0-4, 5-9, unknown)"), which can
+# change the order. Both sides are compared with whitespace collapsed.
+LOCALE_SORT_JS = """([names, direction]) => {
+    const compare = (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })
+    const sign = direction === 'asc' ? 1 : -1
+    return [...names].sort((a, b) => sign * compare(a, b) || compare(a, b))
+}"""
+
+
+def _collapse(name):
+    return " ".join(name.split())
+
+
+def _locale_sorted(frame, names, direction):
+    """The raw names in the app's order, as rendered text."""
+    return [_collapse(name) for name in frame.evaluate(LOCALE_SORT_JS, [names, direction])]
+
+
+def _order_verdict(shown, expected):
+    """(status, detail) for a sort check, naming the first misplaced row."""
+    if shown == expected:
+        return PASS, f"first: {shown[:2]}"
+    index = next(i for i, (a, b) in enumerate(zip(shown, expected)) if a != b)
+    return FAIL, f"row {index}: shown {shown[index]!r}, expected {expected[index]!r}"
+
+
+def _sort_checks(frame, raw_names):
     results = []
     ui.sort_by(frame, "name")
-    ascending = ui.column_values(frame, "name")
+    ascending = [_collapse(name) for name in ui.column_values(frame, "name")]
     results.append(
         (
             "Sort by name ascending",
-            PASS if ascending == sorted(ascending, key=str.lower) else FAIL,
-            f"first: {ascending[:2]}",
+            *_order_verdict(ascending, _locale_sorted(frame, raw_names, "asc")),
         )
     )
     ui.sort_by(frame, "name")
-    descending = ui.column_values(frame, "name")
+    descending = [_collapse(name) for name in ui.column_values(frame, "name")]
     results.append(
         (
             "Sort by name descending",
-            PASS
-            if descending == sorted(descending, key=str.lower, reverse=True)
-            else FAIL,
-            f"first: {descending[:2]}",
+            *_order_verdict(descending, _locale_sorted(frame, raw_names, "desc")),
         )
     )
     # Numeric columns start descending (most-viewed first is this tool's
@@ -536,6 +640,8 @@ def _disable_one(ctx, frame, key, label, row):
     if key == "CATEGORY":
         _shot(ctx, "06-disable-dialog")
 
+    endpoint = TYPE_ENDPOINTS[key]
+    ctx.state.record(run_state.data_dimension_entry(endpoint, uid))
     _click_dialog_button(frame, ui.DISABLE_DIALOG, ui.DISABLE_BUTTON)
     dialog.wait_for(state="detached", timeout=ui.DEFAULT_TIMEOUT_MS)
     # Alerts stack and auto-hide, so match the bar carrying this row's name
@@ -552,7 +658,6 @@ def _disable_one(ctx, frame, key, label, row):
     frame.locator(ui.USAGE_ROW).filter(has_text=uid).first.wait_for(
         state="detached", timeout=ui.DEFAULT_TIMEOUT_MS
     )
-    endpoint = TYPE_ENDPOINTS[key]
     server_value = ctx.client.data_dimension(endpoint, uid)
     results.append(
         (
@@ -629,34 +734,37 @@ def flow_data_error(ctx):
 
     Reproduced by removing data read from the view's sharing, which makes
     `/sqlViews/{id}/data` answer 409 E4312 while the query itself still
-    matches, so the app is in the READY state.
+    matches, so the app is in the READY state. Sharing does not restrict an
+    account with ALL, so this runs as the throwaway non-superuser.
     """
     results = []
+    _table_frame(ctx)  # the view exists before its sharing is narrowed
     _set_view_sharing(ctx.client, METADATA_READ_ONLY_SHARING)
-    frame = ui.open_app(ctx.page, ctx.base_url)
-    ui.wait_for_notice(frame, DATA_ERROR_NOTICE)
-    notice = frame.locator(ui.NOTICE_BOX).first.text_content() or ""
-    results.append(
-        (
-            "Unreadable view data shows an error notice with the server message",
-            PASS if "E4312" in notice or "not authorised" in notice else FAIL,
-            notice.strip()[:160],
+    with _limited_page(ctx) as page:
+        frame = ui.open_app(page, ctx.base_url, ctx.app_key)
+        ui.wait_for_notice(frame, DATA_ERROR_NOTICE)
+        notice = frame.locator(ui.NOTICE_BOX).first.text_content() or ""
+        results.append(
+            (
+                "Unreadable view data shows an error notice with the server message",
+                PASS if "E4312" in notice or "not authorised" in notice else FAIL,
+                notice.strip()[:160],
+            )
         )
-    )
-    results.append(
-        (
-            "Remove SQL view stays available in the error state",
-            PASS
-            if frame.get_by_role("button", name=ui.REMOVE_BUTTON).count() > 0
-            else FAIL,
-            _shot(ctx, "11-data-error"),
+        results.append(
+            (
+                "Remove SQL view stays available in the error state",
+                PASS
+                if frame.get_by_role("button", name=ui.REMOVE_BUTTON).count() > 0
+                else FAIL,
+                _shot_page(ctx, page, "11-data-error"),
+            )
         )
-    )
 
-    _set_view_sharing(ctx.client, READABLE_SHARING)
-    ui.click_button(frame, "Retry")
-    ui.wait_for_table(frame)
-    results.append(("Retry loads the table once access is restored", PASS, ""))
+        _set_view_sharing(ctx.client, READABLE_SHARING)
+        ui.click_button(frame, "Retry")
+        ui.wait_for_table(frame)
+        results.append(("Retry loads the table once access is restored", PASS, ""))
     return results
 
 
@@ -670,7 +778,7 @@ def flow_outdated_update(ctx):
     if create_status >= 400:
         return [("Install the legacy SQL view", FAIL, f"HTTP {create_status}")]
 
-    frame = ui.open_app(ctx.page, ctx.base_url)
+    frame = ui.open_app(ctx.page, ctx.base_url, ctx.app_key)
     ui.wait_for_notice(frame, OUTDATED_NOTICE)
     results.append(
         ("Legacy view is detected as outdated", PASS, _shot(ctx, "08-outdated-notice"))
@@ -699,10 +807,9 @@ def flow_outdated_update(ctx):
 
 
 def _grantable_authority(client):
-    """An authority the provisioning user actually holds.
+    """An authority the acting user actually holds.
 
-    A user can only grant a role whose authorities it has itself; demo
-    superusers often lack `ALL` (and even `F_SQLVIEW_EXECUTE`), so picking
+    A user can only grant a role whose authorities it has itself, so picking
     blind produces `E3003 not allowed to grant`.
     """
     _, me = client.get("/api/me?fields=authorities")
@@ -715,13 +822,13 @@ def _grantable_authority(client):
     return min(held)
 
 
-def _app_authority(client):
+def _app_authority(client, app_key):
     """The `M_<app>` authority the server generated for the installed app.
 
     Without it the 2.42+ global shell answers "Unable to find an app for this
     URL" instead of loading the app.
     """
-    expected = "M_" + APP_KEY.replace("-", "")
+    expected = "M_" + app_key.replace("-", "")
     _, body = client.get("/api/authorities?pageSize=2000")
     for entry in body.get("systemAuthorities") or body.get("authorities") or []:
         if entry.get("id") == expected:
@@ -729,80 +836,64 @@ def _app_authority(client):
     return None
 
 
-def _limited_role_authorities(client):
-    authorities = [_grantable_authority(client)]
-    app_authority = _app_authority(client)
+def _limited_role_authorities(ctx):
+    authorities = [_grantable_authority(ctx.client)]
+    app_authority = _app_authority(ctx.client, ctx.app_key)
     if app_authority:
         authorities.append(app_authority)
     return authorities
 
 
-def _role_id(client):
-    _, roles = client.get(
-        f"/api/userRoles?filter=name:eq:{LIMITED_ROLE_NAME}&fields=id"
+def _limited_client(ctx):
+    """The throwaway user that can open the app but holds no ALL.
+
+    Created once per run, with run-unique uids and names written to the run
+    record first; the run's cleanup deletes it.
+    """
+    if ctx.limited is not None:
+        return ctx.limited
+    role_id = run_state.new_uid()
+    ctx.state.record(run_state.user_role_entry(role_id))
+    status, body = ctx.client.post(
+        "/api/userRoles",
+        {
+            "id": role_id,
+            "name": ctx.state.name("app only"),
+            "authorities": _limited_role_authorities(ctx),
+        },
     )
-    found = roles.get("userRoles") or []
-    return found[0]["id"] if found else None
+    if status >= 400:
+        raise AssertionError(f"Could not create the limited role: {body}")
 
-
-def _ensure_limited_user(client, base_url):
-    """Create (idempotently) a user that can open the app but not write SQL views."""
-    role_id = _role_id(client)
-    if role_id is None:
-        status, body = client.post(
-            "/api/userRoles",
-            {
-                "name": LIMITED_ROLE_NAME,
-                "authorities": _limited_role_authorities(client),
-            },
-        )
-        if status >= 400:
-            raise AssertionError(f"Could not create the limited role: {body}")
-        role_id = _role_id(client)
-
-    _, org_units = client.get("/api/organisationUnits?level=1&fields=id")
+    _, org_units = ctx.client.get("/api/organisationUnits?level=1&fields=id")
     org_unit_id = org_units["organisationUnits"][0]["id"]
-    _, users = client.get(
-        f"/api/users?filter=username:eq:{LIMITED_USERNAME}&fields=id"
+    user_id = run_state.new_uid()
+    username = f"e2e-ddd-{ctx.state.run_id}".lower()
+    ctx.state.record(run_state.user_entry(user_id))
+    status, body = ctx.client.post(
+        "/api/users",
+        {
+            "id": user_id,
+            "username": username,
+            "password": LIMITED_PASSWORD,
+            "firstName": "E2E",
+            "surname": ctx.state.run_id,
+            "userRoles": [{"id": role_id}],
+            "organisationUnits": [{"id": org_unit_id}],
+        },
     )
-    if not (users.get("users") or []):
-        status, body = client.post(
-            "/api/users",
-            {
-                "username": LIMITED_USERNAME,
-                "password": LIMITED_PASSWORD,
-                "firstName": "CDD",
-                "surname": "Limited",
-                "userRoles": [{"id": role_id}],
-                "organisationUnits": [{"id": org_unit_id}],
-            },
-        )
-        if status >= 400:
-            raise AssertionError(f"Could not create the limited user: {body}")
-    return Dhis2Client(base_url, LIMITED_USERNAME, LIMITED_PASSWORD)
+    if status >= 400:
+        raise AssertionError(f"Could not create the limited user: {body}")
+    ctx.limited = Dhis2Client(ctx.base_url, username, LIMITED_PASSWORD)
+    return ctx.limited
 
 
-def _delete_limited_user(client):
-    _, users = client.get(
-        f"/api/users?filter=username:eq:{LIMITED_USERNAME}&fields=id"
-    )
-    for user in users.get("users") or []:
-        client.delete(f"/api/users/{user['id']}")
-    role_id = _role_id(client)
-    if role_id:
-        client.delete(f"/api/userRoles/{role_id}")
-
-
-def flow_limited_user(ctx):
-    """Check 5: a user without the SQL view authority gets a clear error."""
-    results = []
-    provisioner = ctx.provisioner or ctx.client
-    limited = _ensure_limited_user(provisioner, ctx.base_url)
-    ctx.client.delete_sql_view_if_present()
-
+@contextmanager
+def _limited_page(ctx):
+    """A browser page logged in as the throwaway non-superuser."""
+    name, value = _limited_client(ctx).session_cookie()
     context = ctx.browser.new_context(viewport={"width": 1280, "height": 900})
     try:
-        name, value = limited.session_cookie()
         context.add_cookies(
             [
                 {
@@ -813,9 +904,23 @@ def flow_limited_user(ctx):
                 }
             ]
         )
-        page = context.new_page()
+        yield context.new_page()
+    finally:
+        context.close()
+
+
+def _shot_page(ctx, page, name):
+    ui.screenshot(page, ctx.out_dir, f"{ctx.label}-{name}")
+    return f"{ctx.label}-{name}.png"
+
+
+def flow_limited_user(ctx):
+    """Check 5: a user without the SQL view authority gets a clear error."""
+    results = []
+    ctx.client.delete_sql_view_if_present()
+    with _limited_page(ctx) as page:
         recorder = ui.ConsoleRecorder(page)
-        frame = ui.open_app(page, ctx.base_url)
+        frame = ui.open_app(page, ctx.base_url, ctx.app_key)
         ui.wait_for_notice(frame, MISSING_NOTICE)
         ui.click_button(frame, ui.CREATE_BUTTON)
         error_box = frame.locator(ui.MUTATION_ERROR).first
@@ -844,29 +949,10 @@ def flow_limited_user(ctx):
                 f"page errors: {recorder.page_errors}",
             )
         )
-        ui.screenshot(page, ctx.out_dir, f"{ctx.label}-10-limited-user")
-        results.append(("Limited-user screenshot", INFO, f"{ctx.label}-10-limited-user.png"))
-    finally:
-        context.close()
-        _delete_limited_user(provisioner)
-    return results
-
-
-def flow_restore_view(ctx):
-    """Leave the view installed for later passes: recreate it from the app."""
-    frame = ui.open_app(ctx.page, ctx.base_url)
-    title = ui.notice_title(frame)
-    if MISSING_NOTICE in title:
-        ui.click_button(frame, ui.CREATE_BUTTON)
-        ui.wait_for_table(frame)
-    status, _ = ctx.client.sql_view(fields="id")
-    return [
-        (
-            "SQL view left installed on the instance",
-            PASS if status == 200 else FAIL,
-            f"GET {SQL_VIEW_PATH} -> HTTP {status}",
+        results.append(
+            ("Limited-user screenshot", INFO, _shot_page(ctx, page, "10-limited-user"))
         )
-    ]
+    return results
 
 
 def flow_console_clean(ctx):
@@ -905,6 +991,5 @@ FLOWS = [
     ("data-error", flow_data_error),
     ("outdated-update", flow_outdated_update),
     ("limited-user", flow_limited_user),
-    ("restore-view", flow_restore_view),
     ("console-clean", flow_console_clean),
 ]

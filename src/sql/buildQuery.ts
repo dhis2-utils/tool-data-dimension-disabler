@@ -11,6 +11,8 @@ export const SQL_VIEW_COLUMNS = [
     'views',
     'percent',
     'percent_of_views',
+    'data_set_reports',
+    'data_set_report_names',
 ] as const
 
 /**
@@ -110,23 +112,103 @@ const usageSubquery = (type: DimensionType): string =>
         )
         .join('\n      UNION\n')
 
+const quotedList = (values: readonly string[]) =>
+    values.map((value) => `'${value}'`).join(', ')
+
+/**
+ * Value types whose data set report sub-totals are a meaningful total: the
+ * numeric and boolean types. DHIS2's own filter (AggregatableDataElementFilter)
+ * also lets text types through, but a sub-total of text values is not a
+ * total anyone reads, so those data elements are not counted.
+ */
+export const SUBTOTAL_VALUE_TYPES: readonly string[] = [
+    'NUMBER',
+    'UNIT_INTERVAL',
+    'PERCENTAGE',
+    'INTEGER',
+    'INTEGER_POSITIVE',
+    'INTEGER_NEGATIVE',
+    'INTEGER_ZERO_OR_POSITIVE',
+    'BOOLEAN',
+    'TRUE_ONLY',
+]
+
+/**
+ * Aggregation types that analytics cannot aggregate (AggregationType
+ * isAggregatable() is false for CUSTOM and DEFAULT; NONE only aggregates text).
+ */
+export const NON_AGGREGATABLE_AGGREGATION_TYPES: readonly string[] = [
+    'NONE',
+    'CUSTOM',
+    'DEFAULT',
+]
+
+/**
+ * Per category: the data sets whose data set report shows sub-total columns
+ * for it, mirroring DHIS2's DefaultDataSetReportService (2.40-2.43):
+ *  - custom forms (dataset.dataentryform set) never show sub-totals;
+ *  - a section form shows the data elements placed in its sections, a
+ *    default form every data element of the data set;
+ *  - each data element is grouped by its resolved category combo (the data
+ *    set element's override, else the data element's own combo), and a
+ *    combo gets one sub-total column per category option only when it has
+ *    more than one category (CategoryCombo.doSubTotals());
+ *  - the sub-total is an analytics query grouped by the category itself,
+ *    which is skipped when the category is not a data dimension.
+ * No per-section or per-form setting switches sub-totals off.
+ */
+const DATA_SET_REPORT_SUBTOTALS_CTE = `data_set_report_subtotals AS (
+  SELECT x.categoryid, COUNT(*) AS data_sets,
+    json_agg(x.name ORDER BY x.name)::text AS names
+  FROM (
+    SELECT DISTINCT cc.categoryid, ds.datasetid, ds.name
+    FROM dataset ds
+    JOIN datasetelement dse ON dse.datasetid = ds.datasetid
+    JOIN dataelement de ON de.dataelementid = dse.dataelementid
+    JOIN categorycombos_categories cc
+      ON cc.categorycomboid = COALESCE(dse.categorycomboid, de.categorycomboid)
+    WHERE ds.dataentryform IS NULL
+      AND de.valuetype IN (${quotedList(SUBTOTAL_VALUE_TYPES)})
+      AND de.aggregationtype NOT IN (${quotedList(NON_AGGREGATABLE_AGGREGATION_TYPES)})
+      AND (SELECT COUNT(*) FROM categorycombos_categories n
+           WHERE n.categorycomboid = cc.categorycomboid) > 1
+      AND (NOT EXISTS (SELECT 1 FROM section s WHERE s.datasetid = ds.datasetid)
+           OR EXISTS (SELECT 1 FROM section s
+                      JOIN sectiondataelements sde ON sde.sectionid = s.sectionid
+                      WHERE s.datasetid = ds.datasetid
+                        AND sde.dataelementid = de.dataelementid))
+  ) x
+  GROUP BY x.categoryid
+)`
+
+/** Only categories produce data set report sub-totals; group sets get 0 and an empty list. */
+const dataSetReportColumns = (type: DimensionType) =>
+    type.key === 'CATEGORY'
+        ? `COALESCE(MAX(dsr.data_sets), 0) AS data_set_reports,
+    COALESCE(MAX(dsr.names), '[]') AS data_set_report_names`
+        : `0 AS data_set_reports,
+    '[]' AS data_set_report_names`
+
+const dataSetReportJoin = (type: DimensionType) =>
+    type.key === 'CATEGORY'
+        ? `\n  LEFT JOIN data_set_report_subtotals dsr ON dsr.categoryid = z.${type.primaryKey}`
+        : ''
+
 const summaryBlock = (type: DimensionType, minor: number): string =>
     `  SELECT '${type.key}' AS type, z.uid, z.name,
     COUNT(DISTINCT y.favoriteuid) AS favorites,
     COUNT(DISTINCT y.favoriteuid) FILTER (WHERE y.sharingclass = 'public') AS public_favorites,
     COUNT(DISTINCT y.favoriteuid) FILTER (WHERE y.sharingclass = 'shared') AS shared_favorites,
     COUNT(DISTINCT y.favoriteuid) FILTER (WHERE y.sharingclass = 'private') AS private_favorites,
-    COALESCE(SUM(fv.views), 0) AS views
+    COALESCE(SUM(fv.views), 0) AS views,
+    ${dataSetReportColumns(type)}
   FROM ${type.table(minor)} z
   LEFT JOIN (
 ${usageSubquery(type)}
   ) y ON y.objectid = z.${type.primaryKey}
-  LEFT JOIN favorite_views fv ON fv.favoriteuid = y.favoriteuid
+  LEFT JOIN favorite_views fv ON fv.favoriteuid = y.favoriteuid${dataSetReportJoin(type)}
   WHERE z.datadimension = TRUE
   GROUP BY z.uid, z.name`
-
-const quotedList = (values: readonly string[]) =>
-    values.map((value) => `'${value}'`).join(', ')
 
 export const buildQuery = (minor: number): string => `WITH favorite_views AS (
   SELECT favoriteuid, COUNT(*) AS views
@@ -138,6 +220,7 @@ export const buildQuery = (minor: number): string => `WITH favorite_views AS (
 total_favorite_views AS (
   SELECT COALESCE(SUM(views), 0) AS count FROM favorite_views
 ),
+${DATA_SET_REPORT_SUBTOTALS_CTE},
 summary AS (
 ${DIMENSION_TYPES.map((type) => summaryBlock(type, minor)).join('\n  UNION ALL\n')}
 ),
@@ -148,7 +231,8 @@ SELECT s.type, s.uid, s.name,
   s.favorites, s.public_favorites, s.shared_favorites, s.private_favorites,
   s.views,
   COALESCE(s.views::double precision / NULLIF(t.total, 0) * 100.0, 0) AS percent,
-  COALESCE(s.views::double precision / NULLIF(f.count, 0) * 100.0, 0) AS percent_of_views
+  COALESCE(s.views::double precision / NULLIF(f.count, 0) * 100.0, 0) AS percent_of_views,
+  s.data_set_reports, s.data_set_report_names
 FROM summary s
 CROSS JOIN totals t
 CROSS JOIN total_favorite_views f

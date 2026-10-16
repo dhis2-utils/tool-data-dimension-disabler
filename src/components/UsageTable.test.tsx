@@ -17,6 +17,8 @@ const rows: UsageRow[] = [
         views: 5,
         percent: 50,
         percentOfViews: 25,
+        dataSetReports: 2,
+        dataSetReportNames: ['Child Health', 'Reproductive Health'],
     },
     {
         type: 'ORGUNIT_GROUP_SET',
@@ -29,6 +31,8 @@ const rows: UsageRow[] = [
         views: 10,
         percent: 40,
         percentOfViews: 20,
+        dataSetReports: 0,
+        dataSetReportNames: [],
     },
     {
         type: 'CATEGORY',
@@ -41,6 +45,8 @@ const rows: UsageRow[] = [
         views: 0,
         percent: 0,
         percentOfViews: 0,
+        dataSetReports: 0,
+        dataSetReportNames: [],
     },
 ]
 
@@ -48,6 +54,10 @@ const bodyRowNames = () =>
     within(screen.getByTestId('usage-table-body'))
         .getAllByTestId('usage-row')
         .map((row) => within(row).getByTestId('usage-row-name').textContent)
+
+// The chooser tests drive a flyout menu with userEvent and take 4-5 s on
+// their own; under a full parallel run they crossed Jest's 5 s default.
+jest.setTimeout(20000)
 
 describe('UsageTable', () => {
     beforeEach(() => {
@@ -163,6 +173,7 @@ describe('UsageTable', () => {
             'favorites',
             'views',
             'percent',
+            'dataSetReports',
         ]) {
             expect(
                 screen.getByTestId(`usage-header-${key}`)
@@ -239,5 +250,38 @@ describe('UsageTable', () => {
         renderWithProvider(<UsageTable rows={rows} onDisable={jest.fn()} />)
         expect(screen.getByTestId('column-info-views')).toBeInTheDocument()
         expect(screen.queryByTestId('column-info-name')).not.toBeInTheDocument()
+    })
+
+    it('shows the data set report count for categories and a dash for group sets', () => {
+        renderWithProvider(<UsageTable rows={rows} onDisable={jest.fn()} />)
+        const cellOf = (name: string) =>
+            within(
+                screen
+                    .getAllByTestId('usage-row')
+                    .find(
+                        (row) =>
+                            within(row).getByTestId('usage-row-name')
+                                .textContent === name
+                    ) as HTMLElement
+            ).getByTestId('usage-cell-dataSetReports')
+        expect(cellOf('Gender')).toHaveTextContent('2')
+        expect(cellOf('Age')).toHaveTextContent('0')
+        expect(cellOf('Facility Type')).toHaveTextContent('–')
+        // Only a non-empty list gets a tooltip trigger
+        expect(
+            within(cellOf('Age')).queryByTestId(
+                'usage-cell-details-dataSetReports'
+            )
+        ).not.toBeInTheDocument()
+    })
+
+    it('lists the data sets in a tooltip on the count', async () => {
+        const user = userEvent.setup()
+        renderWithProvider(<UsageTable rows={rows} onDisable={jest.fn()} />)
+        await user.hover(
+            screen.getByTestId('usage-cell-details-dataSetReports')
+        )
+        expect(await screen.findByText('Child Health')).toBeInTheDocument()
+        expect(screen.getByText('Reproductive Health')).toBeInTheDocument()
     })
 })

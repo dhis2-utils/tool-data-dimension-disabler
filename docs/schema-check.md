@@ -1,8 +1,8 @@
 # Schema check for the Data dimension usage SQL view
 
-Checked 2026-09-21 on Sierra Leone 2.40.x and 2.43.x seeds, via broker instances
-`agent-cdd-sl40` (DHIS2 2.40.12, seed `dhis2-db-sierra-leone_V40.sql.gz`) and
-`agent-cdd-sl43` (DHIS2 2.43.1, seed `dhis2-db-sierra-leone_v43.sql.gz`).
+Checked 2026-09-21 on two local throwaway instances: the Sierra Leone 2.40
+demo database on DHIS2 2.40.12, and the Sierra Leone 2.43 demo database on
+DHIS2 2.43.1.
 
 ## Result
 
@@ -94,11 +94,11 @@ new dump was needed: the table/column dumps below already show it.
   `"users": null`.
 
 - The three classes are mutually exclusive and sum to the `favorites` total,
-  verified on all 22 rows of `agent-cdd-manual` (2.43.1).
+  verified on all 22 rows of a separate 2.43.1 test instance.
 
 - 2026-09-22: the `CASE` above was compared against an independent Python
   classification of the same `sharing` JSON for **all 433** favorites on
-  `agent-cdd-manual` (269+19+4 visualizations, 91 maps, 50 event
+  that 2.43.1 instance (269+19+4 visualizations, 91 maps, 50 event
   visualizations): **0 disagreements** — 409 public, 20 private and 4 shared
   (all four visualizations shared via `userGroups` with `public` =
   `--------`), so the `shared` branch is evidenced, not just assumed.
@@ -108,8 +108,8 @@ new dump was needed: the table/column dumps below already show it.
   `409 E4310` "SQL query contains references to protected tables" from
   `/api/sqlViews/{uid}/data`. The check is a plain word-boundary scan of the
   query, so a JSON key inside a string literal is enough to trip it, even
-  though no table of that name is referenced. Probed on `agent-cdd-manual`
-  (2.43.1) with one-line views: `'users'`, `'userinfo'` and `'oauth2client'`
+  though no table of that name is referenced. Probed on that 2.43.1 instance
+  with one-line views: `'users'`, `'userinfo'` and `'oauth2client'`
   are rejected; `'user'`, `'usergroup'`, `'userGroups'`, `'useraccess'`,
   `'usergroupaccess'`, `'sharing'`, `'map'` and `'category'` are all fine, as
   is the split spelling `'user' || 's'`. Reading `sharing->'users'` therefore
@@ -121,7 +121,7 @@ new dump was needed: the table/column dumps below already show it.
 
 ## Raw output
 
-### agent-cdd-sl40 (DHIS2 2.40.12) — table/column dump
+### Sierra Leone 2.40 (DHIS2 2.40.12) — table/column dump
 
 ```
 categorydimension: categorydimensionid, categoryid
@@ -185,7 +185,7 @@ mapviewid
 sort_order
 ```
 
-### agent-cdd-sl40 (DHIS2 2.40.12) — eventtype counts
+### Sierra Leone 2.40 (DHIS2 2.40.12) — eventtype counts
 
 ```
 DASHBOARD_VIEW|502
@@ -197,7 +197,7 @@ PASSIVE_DASHBOARD_VIEW|73
 VISUALIZATION_VIEW|1499
 ```
 
-### agent-cdd-sl43 (DHIS2 2.43.1) — table/column dump
+### Sierra Leone 2.43 (DHIS2 2.43.1) — table/column dump
 
 ```
 category: categoryid, name, uid, code, lastupdated, created, datadimension, userid, publicaccess, datadimensiontype, lastupdatedby, translations, attributevalues, sharing, shortname, description
@@ -232,7 +232,7 @@ lookup): `dataelementcategory` (exists as `category` on 2.43 — expected),
 `eventvisualization_dataelementgroupsetdimensions` (do not exist on 2.43
 either).
 
-### agent-cdd-sl43 (DHIS2 2.43.1) — eventtype counts
+### Sierra Leone 2.43 (DHIS2 2.43.1) — eventtype counts
 
 ```
 DASHBOARD_VIEW|524
@@ -243,3 +243,29 @@ MAP_VIEW|74
 PASSIVE_DASHBOARD_VIEW|123
 VISUALIZATION_VIEW|1513
 ```
+
+## Follow-up 2026-10-16 — tables behind the Data set reports column
+
+Checked while adding the data set report sub-totals column, on local
+throwaway instances with the Sierra Leone 2.40 demo database (DHIS2 2.40.12)
+and the Sierra Leone 2.43 demo database (DHIS2 2.43.2).
+
+- The `data_set_report_subtotals` CTE uses `dataset(datasetid, name,
+  dataentryform)`, `datasetelement(datasetid, dataelementid,
+  categorycomboid)`, `dataelement(dataelementid, valuetype, aggregationtype,
+  categorycomboid)`, `categorycombos_categories(categorycomboid, categoryid)`,
+  `section(sectionid, datasetid)` and `sectiondataelements(sectionid,
+  dataelementid)`. All exist with these columns on both versions; none is
+  renamed. The custom-form link is the column `dataset.dataentryform` (not
+  `dataentryformid`). `categorycombos_categories.categoryid` joins the
+  category table on both versions (`dataelementcategory` on 2.40, `category`
+  on 2.43), since both keep the `categoryid` primary key.
+- The generated query ran on both versions, and its per-category data set
+  lists match `e2e/data_set_report_oracle.py` (from `/api/dataSets` and
+  `/api/categoryCombos`) exactly: 12 enabled categories on each, 5 of them
+  with sub-totals (Gender, EPI/nutrition age, HIV age, Location
+  Fixed/Outreach, Pregnant/Non-pregnant).
+- `datastatisticsevent` on the 2.43 seed holds 12 `DATA_SET_REPORT_VIEW`
+  rows, the newest from 2016-06-23, while visualization and map views run to
+  the present: the Reports app does not record data set report views
+  (DHIS2-17175), so the app does not count them.

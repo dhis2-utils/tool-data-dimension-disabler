@@ -14,6 +14,7 @@ export type ColumnKey =
     | 'views'
     | 'percent'
     | 'percentOfViews'
+    | 'dataSetReports'
 
 export type ColumnDef = {
     key: ColumnKey
@@ -24,6 +25,8 @@ export type ColumnDef = {
     numeric: boolean
     alwaysVisible: boolean
     format: (row: UsageRow) => string
+    /** Items listed in a tooltip on the cell, when there are any. */
+    details?: (row: UsageRow) => readonly string[]
 }
 
 // Both helpers take an options object (rather than positional arguments)
@@ -46,6 +49,7 @@ const number = (config: {
     label: () => string
     description: () => string
     format: (row: UsageRow) => string
+    details?: (row: UsageRow) => readonly string[]
 }): ColumnDef => ({
     align: 'right',
     numeric: true,
@@ -134,6 +138,17 @@ export const COLUMN_DEFS: readonly ColumnDef[] = [
             ),
         format: (row) => formatPercent(row.percentOfViews),
     }),
+    number({
+        key: 'dataSetReports',
+        label: () => i18n.t('Data set reports'),
+        description: () =>
+            i18n.t(
+                'Data sets whose data set report shows sub-totals for this category; disabling it leaves those sub-totals empty. Section and default forms only: custom forms never show sub-totals. Hover a number to see the data sets. Group sets never affect data set reports and show a dash.'
+            ),
+        format: (row) =>
+            row.type === 'CATEGORY' ? String(row.dataSetReports) : '–',
+        details: (row) => row.dataSetReportNames,
+    }),
 ]
 
 export const DEFAULT_VISIBLE_COLUMNS: readonly ColumnKey[] = [
@@ -143,6 +158,7 @@ export const DEFAULT_VISIBLE_COLUMNS: readonly ColumnKey[] = [
     'favorites',
     'views',
     'percent',
+    'dataSetReports',
 ]
 
 export const COLUMNS_STORAGE_KEY = 'data-dimension-disabler.columns'
