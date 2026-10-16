@@ -6,16 +6,18 @@ No hard-coded hosts: every caller passes the instance URL, which
 
 import base64
 import json
+import secrets
 import time
 import urllib.error
 import urllib.request
+import zipfile
+from pathlib import Path
 from urllib.parse import urlparse
 
 JSON_CONTENT_TYPE = "application/json"
 JSON_PATCH_CONTENT_TYPE = "application/json-patch+json"
 SQL_VIEW_ID = "GOLswS44mh8"
 SQL_VIEW_PATH = f"/api/sqlViews/{SQL_VIEW_ID}"
-APP_KEY = "data-dimension-disabler"
 
 
 class Dhis2Client:
@@ -72,6 +74,43 @@ class Dhis2Client:
                     return name.strip(), value.strip()
         raise RuntimeError("No JSESSIONID cookie returned by /api/me")
 
+    def install_app(self, zip_path):
+        """POST the bundle to /api/apps as multipart form data; returns the status."""
+        boundary = f"----e2e{secrets.token_hex(8)}"
+        payload = Path(zip_path).read_bytes()
+        body = b"".join(
+            [
+                f"--{boundary}\r\n".encode(),
+                (
+                    'Content-Disposition: form-data; name="file"; '
+                    f'filename="{Path(zip_path).name}"\r\n'
+                ).encode(),
+                b"Content-Type: application/zip\r\n\r\n",
+                payload,
+                f"\r\n--{boundary}--\r\n".encode(),
+            ]
+        )
+        request = urllib.request.Request(
+            f"{self.base_url}/api/apps", data=body, method="POST"
+        )
+        request.add_header("Authorization", self.auth_header)
+        request.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+        try:
+            with urllib.request.urlopen(request) as response:
+                return response.status
+        except urllib.error.HTTPError as error:
+            return error.code
+
+    def app_key_by_name(self, name):
+        """Key the server gave the installed app whose manifest name is `name`."""
+        status, apps = self.get("/api/apps")
+        if status != 200 or not isinstance(apps, list):
+            return None
+        for app in apps:
+            if app.get("name") == name:
+                return app.get("key")
+        return None
+
     def server_version(self):
         _, info = self.get("/api/system/info")
         return info.get("version", "unknown")
@@ -109,6 +148,12 @@ def _parse(raw):
         return json.loads(raw)
     except ValueError:
         return {"raw": raw.decode("utf-8", "replace")}
+
+
+def read_manifest(zip_path):
+    """`manifest.webapp` of a built bundle, as a dict."""
+    with zipfile.ZipFile(zip_path) as bundle:
+        return json.loads(bundle.read("manifest.webapp"))
 
 
 def hostname_of(url):

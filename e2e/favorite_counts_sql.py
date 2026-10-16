@@ -20,8 +20,8 @@ Reading that sharing needs an account that can see every favorite: a private
 favorite owned by somebody else is a 404 for a demo `admin` without `ALL`,
 and guessing "unreadable means private" would quietly turn a *shared*
 favorite into a private one — exactly the class this oracle exists to check.
-So the sharing lookups take their own client (`E2E_SUPERUSER`), and the
-oracle raises `UnreadableFavorites` rather than guess.
+The suite runs as a superuser (`DHIS2_USER`, see e2e/README.md), which can;
+if it cannot, the oracle raises `UnreadableFavorites` rather than guess.
 
 The schema knowledge below is deliberately spelled out rather than derived
 from `src/`: an oracle built from the code under test proves nothing.
@@ -31,10 +31,8 @@ Verified against 2.40.12 and 2.43.1 (see `docs/schema-check.md`).
 import re
 
 from dhis2_api import grid_rows
+from state import new_uid, sql_view_entry
 
-CROSSCHECK_VIEW_ID = "cddE2Echk01"
-CROSSCHECK_VIEW_NAME = "Favorite count cross-check (e2e)"
-CROSSCHECK_VIEW_PATH = f"/api/sqlViews/{CROSSCHECK_VIEW_ID}"
 PUBLIC = "public"
 SHARED = "shared"
 PRIVATE = "private"
@@ -148,10 +146,10 @@ def crosscheck_query(type_key, uid, minor):
     )
 
 
-def _crosscheck_definition(query):
+def _crosscheck_definition(view_id, name, query):
     return {
-        "id": CROSSCHECK_VIEW_ID,
-        "name": CROSSCHECK_VIEW_NAME,
+        "id": view_id,
+        "name": name,
         "description": "Throwaway view created and deleted by the e2e suite",
         "type": "QUERY",
         "cacheStrategy": "NO_CACHE",
@@ -160,23 +158,31 @@ def _crosscheck_definition(query):
     }
 
 
-def favorite_uids(client, type_key, uid, minor):
+def favorite_uids(client, type_key, uid, minor, state):
     """`{kind: [favorite uid, ...]}` for one dimension, straight from the DB.
 
-    Installs the join query as a throwaway SQL view, reads it, and removes it
-    again — so the instance is left exactly as it was found.
+    Installs the join query as a throwaway SQL view with a run-unique uid and
+    name, recorded in the run record before it is created, reads it, and
+    removes it again.
     """
-    client.delete(CROSSCHECK_VIEW_PATH)
+    view_id = new_uid()
+    path = f"/api/sqlViews/{view_id}"
+    state.record(sql_view_entry(view_id))
     status, body = client.post(
-        "/api/sqlViews", _crosscheck_definition(crosscheck_query(type_key, uid, minor))
+        "/api/sqlViews",
+        _crosscheck_definition(
+            view_id,
+            state.name(f"favorite cross-check {view_id}"),
+            crosscheck_query(type_key, uid, minor),
+        ),
     )
     if status >= 400:
         raise AssertionError(f"Could not create the cross-check SQL view: {body}")
     try:
-        _, payload = client.get(f"{CROSSCHECK_VIEW_PATH}/data?paging=false")
+        _, payload = client.get(f"{path}/data?paging=false")
         return _uids_by_kind(grid_rows(payload))
     finally:
-        client.delete(CROSSCHECK_VIEW_PATH)
+        client.delete(path)
 
 
 def _uids_by_kind(rows):
@@ -224,23 +230,22 @@ def _classify_kind(client, kind, uids):
     if missing:
         raise UnreadableFavorites(
             f"/api/{endpoint} did not return {missing} - the account reading "
-            "the sharing cannot see them; set E2E_SUPERUSER/E2E_SUPERPASS"
+            "the sharing cannot see them; DHIS2_USER must hold ALL"
         )
     return [sharing_class(sharing[uid]) for uid in uids]
 
 
-def favorite_counts(client, type_key, uid, minor, sharing_client=None):
+def favorite_counts(client, type_key, uid, minor, state):
     """Count one dimension's favorites per sharing class, independently.
 
     The join comes from SQL, the classification from the Web API: neither
-    half restates the app's own `CASE`. `sharing_client` is the account the
-    sharing is read as, and needs to see every favorite (see the module
-    docstring); it defaults to the acting client.
+    half restates the app's own `CASE`. The client must see every favorite
+    (see the module docstring).
     """
-    by_kind = favorite_uids(client, type_key, uid, minor)
+    by_kind = favorite_uids(client, type_key, uid, minor, state)
     counts = dict.fromkeys(SHARING_CLASSES, 0)
     for kind, uids in by_kind.items():
-        for name in _classify_kind(sharing_client or client, kind, uids):
+        for name in _classify_kind(client, kind, uids):
             counts[name] += 1
     counts[TOTAL_KEY] = sum(counts[name] for name in SHARING_CLASSES)
     return counts

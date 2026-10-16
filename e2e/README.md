@@ -1,78 +1,107 @@
+> [!WARNING]
+> This suite changes and deletes data. It installs and uninstalls the app,
+> disables and re-enables data dimensions, deletes and recreates the app's SQL
+> view, and creates and deletes a user, a user role and SQL views. Run it only
+> against a **throwaway** DHIS2 instance that you can reset or recreate, never
+> against a server whose content anyone wants to keep, including shared test
+> and play servers.
+
 # End-to-end suite
 
-Drives the **installed** Data Dimension Disabler app in a real browser against
-a real DHIS2 instance, and cross-checks every UI claim against the Web API.
-One run covers the full life cycle of the app's SQL view: create → read →
-filter/sort → disable a dimension of each type → remove → detect and update a
-legacy view → permission errors — and leaves the instance as it found it
-(view installed, every dimension re-enabled, throwaway user deleted).
+Drives the Data Dimension Disabler Tool app in a real browser against a real DHIS2
+instance, and cross-checks every UI claim against the Web API. One run covers
+the full life cycle of the app's SQL view: create → read → filter/sort →
+disable a dimension of each type → remove → detect and update a legacy view →
+permission errors.
 
-The suite is parameterised by environment variables only; no host, UID or
-credential is hard-coded, so the same run works on any version from 2.40 up.
+The entry point is `e2e/run.sh`, which follows the shared tool test contract
+(version 1): it installs the bundle, runs the suite, cleans up, uninstalls the
+app and writes `results.json`. No host, UID or credential is hard-coded, and
+the instance and account have no defaults, so nothing runs against an
+instance by accident. The same run works on every version from 2.40 up.
+
+## A throwaway instance
+
+Any local DHIS2 instance you can throw away will do. The simplest is the
+Docker Compose setup in the DHIS2 core repository, which starts DHIS2 with
+the Sierra Leone demo database at `http://localhost:8080`: see
+[Run DHIS2 in Docker](https://github.com/dhis2/dhis2-core#run-dhis2-in-docker).
+Pick the version with `DHIS2_IMAGE`, for example `dhis2/core:2.42.1`, and
+remove the volumes (`docker compose down --volumes`) to start over.
+
+The suite needs an account that holds the **ALL** authority (`DHIS2_USER`).
+On the demo databases the `admin` user does not hold it, so use or create a
+superuser account on your throwaway instance.
 
 ## Requirements
 
-- Python 3 with Playwright and a Chromium build (`pip install playwright`,
-  `playwright install chromium`).
-- The app installed on the target instance:
-
-    ```
-    yarn build
-    curl -u "$DHIS2_USER:$DHIS2_PASS" -F "file=@build/bundle/data-dimension-disabler-1.0.0.zip" \
-        "$DHIS2_URL/api/apps"      # 204 on <= 2.41, 201 on 2.42+
-    ```
+- Python 3 with Playwright for Python and its Chromium
+  (`pip install -r e2e/requirements.txt`, then `python3 -m playwright install chromium`).
+- A built bundle: `yarn build` writes it to `build/bundle/`.
 
 ## Running
 
 ```bash
-DHIS2_URL=http://dhis2-example:8080 DHIS2_PASS=district python3 e2e/run_suite.py
+mkdir -p /tmp/e2e-results
+DHIS2_URL=http://localhost:8080 DHIS2_USER=<superuser> DHIS2_PASS=<password> \
+APP_ZIP=$(ls "$PWD"/build/bundle/*.zip) \
+RESULTS_DIR=/tmp/e2e-results \
+  e2e/run.sh
 ```
 
-| Variable                          | Default                | Meaning                                                                                                                  |
-| --------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `DHIS2_URL`                       | _(required)_           | Instance base URL                                                                                                        |
-| `DHIS2_USER` / `DHIS2_PASS`       | `admin` / _(required)_ | Account the app is driven as; the password has no default, so no credential lives in the repo                            |
-| `E2E_LABEL`                       | server version         | Label in results and screenshot names                                                                                    |
-| `E2E_OUT_DIR`                     | `e2e/results`          | Screenshots + `results-<label>.{json,md}`                                                                                |
-| `E2E_FLOWS`                       | all                    | Comma-separated flow ids to run                                                                                          |
-| `E2E_HEADED`                      | –                      | `1` to watch the browser                                                                                                 |
-| `E2E_SUPERUSER` / `E2E_SUPERPASS` | –                      | ALL-authority account: creates the throwaway limited user, and reads the sharing of favorites the acting user cannot see |
-| `DHIS2_LIMITED_PASSWORD`          | generated per run      | Password set on the throwaway limited user created for the `limited-user` flow                                           |
+| Variable                    | Required | Meaning                                                                                |
+| --------------------------- | -------- | -------------------------------------------------------------------------------------- |
+| `DHIS2_URL`                 | yes      | Base URL of the throwaway instance, no trailing slash                                  |
+| `DHIS2_USER` / `DHIS2_PASS` | yes      | An account holding ALL. No default                                                     |
+| `APP_ZIP`                   | yes      | Absolute path of the built bundle; the suite installs it and uninstalls it at the end  |
+| `RESULTS_DIR`               | yes      | Existing directory for `results.json`, `results.md` and screenshots                    |
+| `LABEL`                     | no       | Label in output and screenshot names; default: the server version                      |
+| `APP_KEY`                   | no       | Default: the key the server reports for the installed app                              |
+| `E2E_FLOWS`                 | no       | Comma-separated flow ids to run (default: all)                                         |
+| `E2E_HEADED`                | no       | `1` to watch the browser                                                               |
+| `DHIS2_LIMITED_PASSWORD`    | no       | Password for the throwaway non-superuser the suite creates; default: generated per run |
 
-`E2E_SUPERUSER` is needed on the DHIS2 demo databases: their `admin` has
-neither `ALL` nor the generated `M_<app>` authority, so it cannot grant a role
-containing them (`E3003`) and the limited-user flow is skipped/fails without
-it. The same account also reads the favorites' sharing for the favorite-count
-oracle — a private favorite owned by somebody else is a 404 for that `admin`,
-and without it those cross-checks report SKIP. Broker instances ship
-`local_admin` / `district`, which has `ALL`:
+Exit codes: `0` every test passed, `1` at least one failed, `2` the suite
+could not run (the stage is in `results.json` under `error`). The runner also
+prints one line per step and writes the same table to `results.md`.
 
-```bash
-DHIS2_URL=http://dhis2-example:8080 DHIS2_PASS=district \
-E2E_SUPERUSER=local_admin E2E_SUPERPASS=district \
-python3 e2e/run_suite.py
-```
+## What a run changes, and how it is undone
 
-The runner exits non-zero if any step fails, prints one line per step, and
-writes the same table to `results-<label>.md` next to the screenshots.
+Before each change, the suite writes it to a run record on the instance, in
+the dataStore at `e2e-state/tool-data-dimension-disabler`. Every run starts by
+undoing what the record still lists (from an earlier run that was killed),
+and ends by undoing its own changes and deleting the record:
+
+- the installed app, uninstalled at the end;
+- the app's "Data dimension usage" SQL view: its definition is recorded as
+  found (or that there was none), it is removed so the suite starts without
+  one, and at the end it is put back exactly as found;
+- every dimension the suite disables, enabled again;
+- a user role and a user without ALL, used by the `data-error` and
+  `limited-user` flows, deleted;
+- the throwaway SQL views of the favorite-count cross-check, deleted.
+
+Everything the suite creates gets a run-unique uid and a name starting with
+`E2E tool-data-dimension-disabler <run id>` (the user's name starts with
+`e2e-ddd-`), so leftovers are easy to find and never collide with a later
+run. A final `cleanup` step reports whether the instance was left as found.
 
 ## Flows
 
-| Id                 | What it proves                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `load-missing`     | Fresh load with no view shows the create notice; exactly one header bar (top level ≤2.41, global-shell iframe 2.42+)                                                                                                                                                                                                                                                                                                                                                                      |
-| `create-view`      | Create installs the view with the expected name and `r-r-----` sharing; the table lists all four dimension types; every row matches the `/sqlViews/{id}/data` payload; the favorite counts of the three dimensions with the most favorites match an independent second count; every category's data set report sub-totals (count and data set names) match an independent count from `/api/dataSets`, and hovering a count lists the data sets; records the data endpoint's response time |
-| `columns-chooser`  | The table opens with the default columns (including Data set reports); the Manage view chooser shows "Private", the choice survives a page reload (`localStorage`), and unticking removes it again                                                                                                                                                                                                                                                                                        |
-| `layout`           | The DHIS2 design tokens the stylesheets use resolve in the browser (the app must render `<CssVariables>`); every right-aligned numeric header sits above its numbers and its sort icon follows the label, as in every other column; the chooser draws one checkbox per column, ticked for exactly the columns on screen                                                                                                                                                                   |
-| `filter-sort`      | Each type filter shows exactly that type's rows; name and views sort, both directions (numeric columns start descending)                                                                                                                                                                                                                                                                                                                                                                  |
-| `disable-per-type` | Disables the least-viewed object of each type: dialog names object and type, the row disappears, a success alert names it, and the API reports `dataDimension=false`                                                                                                                                                                                                                                                                                                                      |
-| `re-enable`        | Puts every disabled dimension back (also runs unconditionally at the end of a run)                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `remove-recreate`  | Remove returns to the create notice (view really gone), creating again restores the table                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `data-error`       | With data read removed from the view's sharing, `/data` answers 409 E4312: the app shows the server message, keeps "Remove SQL view" available, and Retry recovers                                                                                                                                                                                                                                                                                                                        |
-| `outdated-update`  | A legacy category-only view (old name, `rwrw----`) is detected as outdated and updated in place: same UID, new name, `r-r-----`                                                                                                                                                                                                                                                                                                                                                           |
-| `limited-user`     | A user without the SQL view authority sees the server's message plus the "Add/Update SQL view" hint, and the app does not crash                                                                                                                                                                                                                                                                                                                                                           |
-| `restore-view`     | Leaves the view installed for the next run                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `console-clean`    | No app console errors, no React duplicate-key warnings, no unexpected 4xx/5xx                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Id                 | What it proves                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `load-missing`     | Fresh load with no view shows the create notice; exactly one header bar (top level ≤2.41, global-shell iframe 2.42+)                                                                                                                                                                                                                                                                                                                                                                                     |
+| `create-view`      | Create installs the view with the expected name and `r-r-----` sharing; the table lists every dimension type the server returns; every row matches the `/sqlViews/{id}/data` payload; the favorite counts of the three dimensions with the most favorites match an independent second count; every category's data set report sub-totals (count and data set names) match an independent count from `/api/dataSets`, and hovering a count lists the data sets; records the data endpoint's response time |
+| `columns-chooser`  | The table opens with the default columns (including Data set reports); the Manage view chooser shows "Private", the choice survives a page reload (`localStorage`), and unticking removes it again                                                                                                                                                                                                                                                                                                       |
+| `layout`           | The DHIS2 design tokens the stylesheets use resolve in the browser (the app must render `<CssVariables>`); every right-aligned numeric header sits above its numbers and its sort icon follows the label, as in every other column; the chooser draws one checkbox per column, ticked for exactly the columns on screen                                                                                                                                                                                  |
+| `filter-sort`      | Each type filter shows exactly that type's rows; name and views sort, both directions (numeric columns start descending)                                                                                                                                                                                                                                                                                                                                                                                 |
+| `disable-per-type` | Disables the least-viewed object of each type: dialog names object and type, the row disappears, a success alert names it, and the API reports `dataDimension=false`                                                                                                                                                                                                                                                                                                                                     |
+| `re-enable`        | Puts every disabled dimension back (also runs unconditionally at the end of a run, before the run record is undone)                                                                                                                                                                                                                                                                                                                                                                                      |
+| `remove-recreate`  | Remove returns to the create notice (view really gone), creating again restores the table                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `data-error`       | As the throwaway non-superuser (sharing does not restrict ALL), with data read removed from the view's sharing, `/data` answers 409 E4312: the app shows the server message, keeps "Remove SQL view" available, and Retry recovers                                                                                                                                                                                                                                                                       |
+| `outdated-update`  | A legacy category-only view (old name, `rwrw----`) is detected as outdated and updated in place: same UID, new name, `r-r-----`                                                                                                                                                                                                                                                                                                                                                                          |
+| `limited-user`     | A user without the SQL view authority sees the server's message plus the "Add/Update SQL view" hint, and the app does not crash                                                                                                                                                                                                                                                                                                                                                                          |
+| `console-clean`    | No app console errors, no React duplicate-key warnings, no unexpected 4xx/5xx                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 Platform noise that is not the app's doing (the PWA "not a secure context"
 message on plain http, the shell's optional `staticContent/logo_banner` and
@@ -118,10 +147,11 @@ Python rule over every favorite on the test database — 433 rows, 0
 disagreements, including the 4 genuinely shared visualizations — and that
 check is recorded in `docs/schema-check.md`.
 
-The sharing lookups run as `E2E_SUPERUSER` when it is set. A private favorite
-owned by someone else is a 404 for a demo `admin`, and treating "unreadable"
-as "private" would silently turn a _shared_ favorite into a private one, so
-the oracle raises `UnreadableFavorites` instead and the flow reports SKIP.
+The sharing lookups need an account that can see every favorite, which is
+why `DHIS2_USER` must hold ALL. A private favorite owned by someone else is a
+404 for an account without it, and treating "unreadable" as "private" would
+silently turn a _shared_ favorite into a private one, so the oracle raises
+`UnreadableFavorites` instead and the flow reports SKIP.
 
 One trap worth knowing when writing SQL for a view: DHIS2 refuses to execute
 a SQL view whose _text_ contains the word `users` (`E4310`, "SQL query
