@@ -9,5 +9,12 @@ export default defineConfig([
     includeIgnoreFile(gitignorePath, 'Imported .gitignore patterns'),
     {
         extends: [config],
+        settings: {
+            'import/resolver': {
+                typescript: {
+                    project: './tsconfig.json',
+                },
+            },
+        },
     },
 ])

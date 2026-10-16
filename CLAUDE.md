@@ -32,7 +32,7 @@ in the last 12 months and lets an admin disable them.
 
 ## Conventions
 
-- yarn 1, `yarn lint` = eslint + prettier + tsc. Tests next to sources,
+- pnpm (version pinned in `packageManager`), `pnpm lint` = eslint + prettier + tsc. Tests next to sources,
   `renderWithProvider` from `src/test-utils`. `data-test` is the test id
   attribute.
 - Never call `i18n.t` at module scope.
@@ -57,7 +57,7 @@ in the last 12 months and lets an admin disable them.
 ## Testing against DHIS2
 
 - Only ever against a throwaway local instance (the app and the e2e suite
-  change data). `yarn start --proxy http://localhost:8080`;
+  change data). `pnpm start --proxy http://localhost:8080`;
   `scripts/generate-view-events.sh <url> <user:password>` seeds view events
   so the ranking is non-trivial.
 - e2e suite: `e2e/run.sh` (shared tool test contract; needs a superuser,

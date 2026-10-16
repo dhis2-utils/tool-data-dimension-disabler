@@ -37,7 +37,7 @@ superuser account on your throwaway instance.
 
 - Python 3 with Playwright for Python and its Chromium
   (`pip install -r e2e/requirements.txt`, then `python3 -m playwright install chromium`).
-- A built bundle: `yarn build` writes it to `build/bundle/`.
+- A built bundle: `pnpm build` writes it to `build/bundle/`.
 
 ## Running
 

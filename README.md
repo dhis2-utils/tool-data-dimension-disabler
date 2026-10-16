@@ -198,11 +198,11 @@ them. The DHIS2 core repository's
 starts one with the Sierra Leone demo database at `http://localhost:8080`.
 
 ```
-yarn install
-yarn start --proxy http://localhost:8080
-yarn test
-yarn lint
-yarn build        # bundle in build/bundle/
+pnpm install
+pnpm start --proxy http://localhost:8080
+pnpm test
+pnpm lint
+pnpm build        # bundle in build/bundle/
 ```
 
 `scripts/generate-view-events.sh <base-url> <user:password>` records
