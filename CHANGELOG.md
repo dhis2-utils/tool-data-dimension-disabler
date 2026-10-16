@@ -4,14 +4,39 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Upgrading
+
+- The app key changes from `data-dimension-disabler` to
+  `tool-data-dimension-disabler`, and the name to "Data Dimension Disabler
+  Tool". DHIS2 treats this as a different app:
+    - Install the new version, then uninstall the old "Data Dimension Disabler"
+      in App Management right away. Otherwise two entries remain in the menu,
+      and the two apps keep offering to "update" the shared SQL view to their
+      own version; the old app's update removes the Data set reports column.
+    - Add the new app to every user role that gave access to the old one. Until
+      then, users without the ALL authority cannot open it.
+    - Bookmarks to the old app URL stop working.
+- The SQL view needs an update, which the app offers on startup. It keeps
+  its UID, so no usage data is lost.
+
 ### Added
 
 - **Data set reports** column: for each category, the data sets whose data
   set report shows sub-totals for it (section and default forms with a
   category combination of more than one category), listed in a tooltip.
   Disabling such a category leaves those sub-totals empty; the disable
-  dialog now lists the affected data sets. Requires updating the SQL view,
-  which the app offers on startup.
+  dialog now lists the affected data sets.
+- Known limitations section in the README.
+
+### Changed
+
+- App key `tool-data-dimension-disabler` and name "Data Dimension Disabler
+  Tool", following the shared tool naming conventions.
+- The end-to-end suite follows the shared tool test contract: `e2e/run.sh`
+  installs the bundle, records every change it makes in the dataStore
+  (`e2e-state`) before making it, leaves the instance as it found it,
+  uninstalls the app and writes `results.json`. It needs a superuser and has
+  no default instance or account.
 
 ## [1.0.0] - 2026-09-21
 

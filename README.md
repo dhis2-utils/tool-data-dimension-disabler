@@ -1,10 +1,10 @@
-# Data Dimension Disabler
+# Data Dimension Disabler Tool
 
 > ![Maturity: Validated](https://img.shields.io/badge/maturity-Validated-yellow)  
 > Intended use: review use of data dimensions in favourites and analytics, to quickly disable those that are not used.  
 > Maintainers: HISP Centre implementation team.
->
-> **WARNING**  
+
+> [!WARNING]
 > This tool is intended to be used by system administrators, not end users. It is available as a DHIS2 app, but has not been through the same rigorous testing as normal core apps. It should be used with care, and always tested in a development environment.
 
 ## License
@@ -169,32 +169,68 @@ follow the user to another machine.
   sharing makes the data endpoint answer `409 E4312` ("Current user is not
   authorised to read data from SQL view") regardless of that authority.
 - On DHIS2 2.42 and later, the global app shell also requires the
-  server-generated **M_datadimensiondisabler** authority to open the app at
+  server-generated **M_tooldatadimensiondisabler** authority to open the app at
   all — without it, the shell answers "Unable to find an app for this URL".
 
 ## Compatibility
 
 DHIS2 2.40 to 2.43.
 
+## Known limitations
+
+- Usage is what DHIS2 records in its usage statistics: favorites opened in
+  the Data Visualizer, Maps and Line Listing/Event apps. Analytics requests
+  from scripts, integrations or other apps that use a dimension leave no
+  trace there, so a dimension they depend on can still rank as unused.
+- Data set report views are not counted, because DHIS2 does not record them
+  (see [Data set reports](#data-set-reports)).
+- Only dimensions that are currently enabled are listed. A data set report
+  that already shows empty sub-totals because a category was disabled
+  earlier is not reported.
+- The data set report column counts numeric and boolean data elements only.
+
 ## Development
+
+Develop against a local DHIS2 instance you can throw away: the app disables
+data dimensions, which affects every favorite and data set report that uses
+them. The DHIS2 core repository's
+[Docker Compose setup](https://github.com/dhis2/dhis2-core#run-dhis2-in-docker)
+starts one with the Sierra Leone demo database at `http://localhost:8080`.
 
 ```
 yarn install
-yarn start --proxy https://play.im.dhis2.org/dev-2-43
+yarn start --proxy http://localhost:8080
 yarn test
 yarn lint
 yarn build        # bundle in build/bundle/
 ```
 
-`scripts/generate-view-events.sh <base-url> [user:password]` records
-favorite-view events against a test instance, so the ranking has non-trivial
-data to show while developing.
+`scripts/generate-view-events.sh <base-url> <user:password>` records
+favorite-view events on that instance, so the ranking has non-trivial data to
+show while developing. The end-to-end suite is described in
+[e2e/README.md](e2e/README.md).
+
+## Upgrading to the tool-data-dimension-disabler key
+
+From the next release the app's key is `tool-data-dimension-disabler`
+(previously `data-dimension-disabler`), and its name is "Data Dimension
+Disabler Tool". DHIS2 treats it as a different app:
+
+1. Install the new version, then uninstall the old "Data Dimension Disabler"
+   in App Management right away. Otherwise two entries remain in the menu,
+   and the two apps keep offering to "update" the shared SQL view to their
+   own version; the old app's update removes the Data set reports column.
+2. Add the new app to every user role that gave access to the old one. Until
+   then, users without the ALL authority cannot open it.
+3. Bookmarks to the old app URL stop working.
+
+The SQL view is shared by both, so no usage data is lost.
 
 ## Upgrading from Category dimension disabler
 
 Installing this app does not automatically remove or replace the old
 "Category dimension disabler" app — uninstall it yourself after installing
-Data Dimension Disabler. The old app's SQL view is detected on startup and
+Data Dimension Disabler Tool. The old app's SQL view is detected on startup and
 updated in place (same UID, new name and content), so no usage history or
 manual re-configuration is needed; it is not created a second time under a
 new UID.

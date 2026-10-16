@@ -1,4 +1,4 @@
-# Data Dimension Disabler
+# Data Dimension Disabler Tool
 
 DHIS2 App Platform app (TypeScript, React 18, @dhis2/app-runtime, @dhis2/ui).
 Ranks categories and group sets enabled as data dimensions by favorite views
@@ -56,7 +56,14 @@ in the last 12 months and lets an admin disable them.
 
 ## Testing against DHIS2
 
-- `yarn start --proxy <url>`; `scripts/generate-view-events.sh <url>` seeds
-  view events so the ranking is non-trivial.
-- Full multi-version review recipe: `dhis2-app-review` skill; last run
-  recorded in `docs/review-2026-09-21/`. Reusable e2e suite: `e2e/README.md`.
+- Only ever against a throwaway local instance (the app and the e2e suite
+  change data). `yarn start --proxy http://localhost:8080`;
+  `scripts/generate-view-events.sh <url> <user:password>` seeds view events
+  so the ranking is non-trivial.
+- e2e suite: `e2e/run.sh` (shared tool test contract; needs a superuser,
+  `APP_ZIP` and `RESULTS_DIR`, no defaults), see `e2e/README.md`. It records
+  every change in the dataStore (`e2e-state/tool-data-dimension-disabler`)
+  before making it and undoes it at the end. Last multi-version review:
+  `docs/review-2026-09-21/`.
+- The repo must not reference team-internal dev tooling (instance brokers,
+  sandbox variables, agent skills); `docs/superpowers/` holds old plans.

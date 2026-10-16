@@ -254,7 +254,7 @@ msgstr ""
 
 msgctxt "Application title"
 msgid "__MANIFEST_APP_TITLE"
-msgstr "Data Dimension Disabler"
+msgstr "Data Dimension Disabler Tool"
 
 msgctxt "Application description"
 msgid "__MANIFEST_APP_DESCRIPTION"

@@ -22,7 +22,7 @@ describe('sqlView', () => {
             sharing: { public: 'r-r-----' },
         })
         expect(definition.sqlQuery).toBe(buildQuery(43))
-        expect(definition.description).toContain('Data Dimension Disabler')
+        expect(definition.description).toContain('Data Dimension Disabler Tool')
     })
 
     it('normalises whitespace before comparing', () => {
