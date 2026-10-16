@@ -10,6 +10,9 @@ in the last 12 months and lets an admin disable them.
   types (API endpoint + SQL names). Add a type here, nowhere else.
 - `src/sql/buildQuery.ts` — generates the SQL view query per server minor
   version. `docs/schema-check.md` records the verified table names.
+  Its `data_set_report_subtotals` CTE mirrors DHIS2 core's data set report
+  sub-total rules (README "Data set reports"); `e2e/data_set_report_oracle.py`
+  re-derives the same answer from the metadata API.
 - `src/sql/sqlView.ts` — view UID `GOLswS44mh8` (kept from the original
   category-only app so installs upgrade in place), name, sharing, outdated
   check.

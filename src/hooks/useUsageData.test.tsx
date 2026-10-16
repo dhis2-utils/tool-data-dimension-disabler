@@ -2,7 +2,7 @@ import { screen, waitFor } from '@testing-library/react'
 import React from 'react'
 import { SQL_VIEW_ID } from '../sql/sqlView'
 import { renderWithProvider } from '../test-utils/renderWithProvider'
-import { parseUsageRows, useUsageData } from './useUsageData'
+import { ListGrid, parseUsageRows, useUsageData } from './useUsageData'
 
 const grid = {
     headers: [
@@ -16,9 +16,24 @@ const grid = {
         { name: 'views' },
         { name: 'percent' },
         { name: 'percent_of_views' },
+        { name: 'data_set_reports' },
+        { name: 'data_set_report_names' },
     ],
     rows: [
-        ['CATEGORY', 'cX5k9anHEHd', 'Gender', 7, 4, 2, 1, 12, 60.0, 30.0],
+        [
+            'CATEGORY',
+            'cX5k9anHEHd',
+            'Gender',
+            7,
+            4,
+            2,
+            1,
+            12,
+            60.0,
+            30.0,
+            2,
+            '["Child Health", "Reproductive Health"]',
+        ],
         [
             'ORGUNIT_GROUP_SET',
             'J5jldMd8OHv',
@@ -30,6 +45,8 @@ const grid = {
             '8',
             '40',
             '20',
+            '0',
+            '[]',
         ],
     ],
 }
@@ -48,6 +65,8 @@ describe('parseUsageRows', () => {
                 views: 12,
                 percent: 60,
                 percentOfViews: 30,
+                dataSetReports: 2,
+                dataSetReportNames: ['Child Health', 'Reproductive Health'],
             },
             {
                 type: 'ORGUNIT_GROUP_SET',
@@ -60,6 +79,8 @@ describe('parseUsageRows', () => {
                 views: 8,
                 percent: 40,
                 percentOfViews: 20,
+                dataSetReports: 0,
+                dataSetReportNames: [],
             },
         ])
     })
@@ -75,7 +96,10 @@ describe('parseUsageRows', () => {
     it('drops rows with an unknown type and returns [] for no grid', () => {
         const withJunk = {
             ...grid,
-            rows: [...grid.rows, ['PROGRAM', 'x', 'y', 1, 1, 1, 1, 1, 1, 1]],
+            rows: [
+                ...grid.rows,
+                ['PROGRAM', 'x', 'y', 1, 1, 1, 1, 1, 1, 1, 0, '[]'],
+            ],
         }
         expect(parseUsageRows(withJunk)).toHaveLength(2)
         expect(parseUsageRows(undefined)).toEqual([])
@@ -99,7 +123,20 @@ describe('parseUsageRows', () => {
             publicFavorites: 0,
             sharedFavorites: 0,
             privateFavorites: 0,
+            dataSetReports: 0,
+            dataSetReportNames: [],
         })
+    })
+
+    it('reads no data set names from a malformed or non-array value', () => {
+        for (const names of ['not json', '{"a": 1}', null]) {
+            const row: ListGrid['rows'][number] = [...grid.rows[0]]
+            row[11] = names
+            expect(
+                parseUsageRows({ headers: grid.headers, rows: [row] })[0]
+                    .dataSetReportNames
+            ).toEqual([])
+        }
     })
 })
 

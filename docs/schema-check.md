@@ -243,3 +243,29 @@ MAP_VIEW|74
 PASSIVE_DASHBOARD_VIEW|123
 VISUALIZATION_VIEW|1513
 ```
+
+## Follow-up 2026-10-16 — tables behind the Data set reports column
+
+Checked while adding the data set report sub-totals column, on broker
+instances `agent-dsr-sl40` (DHIS2 2.40.12, seed `dhis2-db-sierra-leone_V40.pgc`)
+and `agent-promo-sl43` (DHIS2 2.43.2, Sierra Leone 2.43 seed).
+
+- The `data_set_report_subtotals` CTE uses `dataset(datasetid, name,
+  dataentryform)`, `datasetelement(datasetid, dataelementid,
+  categorycomboid)`, `dataelement(dataelementid, valuetype, aggregationtype,
+  categorycomboid)`, `categorycombos_categories(categorycomboid, categoryid)`,
+  `section(sectionid, datasetid)` and `sectiondataelements(sectionid,
+  dataelementid)`. All exist with these columns on both versions; none is
+  renamed. The custom-form link is the column `dataset.dataentryform` (not
+  `dataentryformid`). `categorycombos_categories.categoryid` joins the
+  category table on both versions (`dataelementcategory` on 2.40, `category`
+  on 2.43), since both keep the `categoryid` primary key.
+- The generated query ran on both versions, and its per-category data set
+  lists match `e2e/data_set_report_oracle.py` (from `/api/dataSets` and
+  `/api/categoryCombos`) exactly: 12 enabled categories on each, 5 of them
+  with sub-totals (Gender, EPI/nutrition age, HIV age, Location
+  Fixed/Outreach, Pregnant/Non-pregnant).
+- `datastatisticsevent` on the 2.43 seed holds 12 `DATA_SET_REPORT_VIEW`
+  rows, the newest from 2016-06-23, while visualization and map views run to
+  the present: the Reports app does not record data set report views
+  (DHIS2-17175), so the app does not count them.

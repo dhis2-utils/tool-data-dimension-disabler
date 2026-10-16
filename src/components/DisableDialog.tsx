@@ -42,6 +42,20 @@ export const DisableDialog = ({
                         'Favorites that use this dimension will stop working until it is re-enabled in the Maintenance app. Analytics tables shrink at the next analytics run.'
                     )}
                 </p>
+                {row.dataSetReportNames.length > 0 && (
+                    <>
+                        <p>
+                            {i18n.t(
+                                'Data set reports for these data sets will show empty sub-totals for this category:'
+                            )}
+                        </p>
+                        <ul data-test="disable-dialog-data-sets">
+                            {row.dataSetReportNames.map((name) => (
+                                <li key={name}>{name}</li>
+                            ))}
+                        </ul>
+                    </>
+                )}
             </>
         }
         confirmLabel={i18n.t('Disable')}

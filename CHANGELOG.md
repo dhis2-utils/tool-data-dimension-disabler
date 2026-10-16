@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Data set reports** column: for each category, the data sets whose data
+  set report shows sub-totals for it (section and default forms with a
+  category combination of more than one category), listed in a tooltip.
+  Disabling such a category leaves those sub-totals empty; the disable
+  dialog now lists the affected data sets. Requires updating the SQL view,
+  which the app offers on startup.
+
 ## [1.0.0] - 2026-09-21
 
 ### Changed

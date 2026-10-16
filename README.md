@@ -30,7 +30,8 @@ or event visualizations. Dimensions with no or very few views are good
 candidates for disabling. The app lets an admin disable a dimension directly
 from the table, with a confirmation dialog that explains the consequence:
 favorites that use a disabled dimension stop working until it is re-enabled,
-and section forms lose their subtotals for it. A dimension can always be
+and data set reports with section or default forms show empty sub-totals for
+a disabled category (see [Data set reports](#data-set-reports)). A dimension can always be
 re-enabled again in the Maintenance app, so try changes on a test system
 first.
 
@@ -87,6 +88,55 @@ overall system activity, not just relative to other dimensions. These
 definitions, and those of the other numeric columns, are also available in
 the app itself: hover the ⓘ icon in a column header.
 
+### Data set reports
+
+A category can matter outside favorites too: data set reports use it for
+their **sub-totals**. When a data element's category combination has more
+than one category (for example Age and Sex), the report adds a sub-total
+column per category option ("Female", "Male", "<5y", …) next to the
+values and the grand total. Each sub-total is an analytics query grouped by
+that category, and DHIS2 skips the query when the category is not a data
+dimension: the column stays, but its cells are empty. Grand totals and the
+values themselves group by category option combination and are not
+affected.
+
+The **Data set reports** column counts, per category, the data sets whose
+report shows such sub-totals, and hovering the number lists them. The rules
+follow the DHIS2 core code for 2.40–2.43 (`DefaultDataSetReportService`,
+`AnalyticsDataSetReportStore`):
+
+- **Section and default forms only.** A custom form's report fills the form
+  with values, data element totals and indicator values, none of which
+  depend on the flag; a custom form has no field for a per-option sub-total.
+- A **section form** shows only the data elements placed in its sections; a
+  **default form** shows every data element of the data set.
+- The category combination is the data set's override for that data element
+  when one is set, otherwise the data element's own.
+- There is **no setting** that turns sub-totals off: they appear for every
+  combination with more than one category. The section's "show row/column
+  totals" options and the combination's "skip total" only affect data entry
+  and the grand total.
+- Only numeric and boolean data elements with an aggregation type analytics
+  can aggregate are counted. (DHIS2 also queries sub-totals for text data
+  elements, but a sub-total of text values is not a total anyone reads.)
+
+Group sets never affect data set report sub-totals, so their rows show a
+dash. The disable dialog for a category lists the affected data sets.
+
+Two related effects are deliberately not counted:
+
+- **The report's filter.** A data set report can be filtered by the data
+  set's attribute categories and the category option group sets reached
+  through them (the list comes from `/api/dimensions/dataSet/{uid}`).
+  Filtering needs the analytics column, so once one of those is disabled it
+  can no longer be used as a filter there.
+- **How often data set reports are opened.** DHIS2 has a
+  `DATA_SET_REPORT_VIEW` usage event, but the Reports app does not record it
+  ([DHIS2-17175](https://dhis2.atlassian.net/browse/DHIS2-17175), open as of
+  October 2026): on the Sierra Leone 2.43 demo the newest such event dates
+  from 2016. A view count would read zero everywhere, so the column counts
+  data sets rather than report views.
+
 The view is created with `public: 'r-r-----'` sharing (metadata read plus
 data read; the `/sqlViews/{uid}/data` endpoint that returns the ranked rows
 requires data read specifically). It can be removed again from within the
@@ -96,8 +146,10 @@ app at any time — the app offers to recreate it the next time it is opened.
 
 The **Manage view** button above the table shows or hides any column except Type
 and Name, which are always shown. The table starts with Type, Name, UID,
-Favorites, Views and "% of dimension views"; Public, Shared, Private and
-"% of favorite views" start hidden. The choice is remembered in the browser's
+Favorites, Views, "% of dimension views" and Data set reports; Public,
+Shared, Private and "% of favorite views" start hidden. A browser that
+saved a column choice before the Data set reports column existed keeps that
+choice, so the new column has to be ticked there once. The choice is remembered in the browser's
 `localStorage` (key `data-dimension-disabler.columns`), so it is per browser
 and per user, not a server-side setting: it survives a reload but does not
 follow the user to another machine.

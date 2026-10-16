@@ -4,6 +4,7 @@ Flows are ordered: the suite starts with no SQL view installed and ends with
 the view installed again and every dimension re-enabled.
 """
 
+import json
 import os
 import re
 import secrets
@@ -21,6 +22,7 @@ from dhis2_api import (
     grid_rows,
     hostname_of,
 )
+from data_set_report_oracle import UnreadableMetadata, data_set_report_names
 from favorite_counts_sql import favorite_counts, UnreadableFavorites
 from legacy_sql_view import LEGACY_NAME, legacy_definition
 
@@ -49,7 +51,18 @@ TYPE_ENDPOINTS = {
     "CATEGORYOPTION_GROUP_SET": "categoryOptionGroupSets",
 }
 
-DEFAULT_COLUMNS = ("type", "name", "uid", "favorites", "views", "percent")
+DEFAULT_COLUMNS = (
+    "type",
+    "name",
+    "uid",
+    "favorites",
+    "views",
+    "percent",
+    "dataSetReports",
+)
+DATA_SET_REPORTS_COLUMN = "dataSetReports"
+DATA_SET_REPORTS_DETAILS = f"[data-test='usage-cell-details-{DATA_SET_REPORTS_COLUMN}']"
+TOOLTIP = "[data-test='dhis2-uicore-tooltip-content']"
 # Column keys shown only after the user asks for them, and the oracle key
 # each of them is cross-checked against.
 SHARING_COLUMNS = {
@@ -59,7 +72,7 @@ SHARING_COLUMNS = {
 }
 FAVORITE_COLUMNS = {"favorites": "favorites", **SHARING_COLUMNS}
 # One chooser entry per column defined in src/components/columns.ts.
-COLUMN_COUNT = 10
+COLUMN_COUNT = 11
 CHOOSER_COLUMN = "privateFavorites"
 CHOOSER_COLUMN_LABEL = "Private"
 CROSSCHECK_ROW_LIMIT = 3
@@ -251,7 +264,69 @@ def _compare_table_with_api(ctx, frame, api_rows):
     )
 
     results.extend(_favorite_column_checks(ctx, frame, api_rows))
+    results.extend(_data_set_report_checks(ctx, frame, api_rows))
     return results
+
+
+def _sql_names(api_row):
+    try:
+        return sorted(json.loads(api_row.get("data_set_report_names") or "[]"))
+    except ValueError:
+        return None
+
+
+def _data_set_report_checks(ctx, frame, api_rows):
+    """Sub-total data sets per category: SQL vs the metadata API, then the UI."""
+    step = "Data set report sub-totals match an independent count from /api/dataSets"
+    try:
+        expected = data_set_report_names(ctx.provisioner or ctx.client)
+    except UnreadableMetadata as error:
+        return [(step, SKIP, str(error))]
+    categories = [row for row in api_rows if row["type"] == "CATEGORY"]
+    mismatches = [
+        f"{row['name']}: view {_sql_names(row)}, API {expected.get(row['uid'], [])}"
+        for row in categories
+        if _sql_names(row) != expected.get(row["uid"], [])
+        or int(row["data_set_reports"]) != len(expected.get(row["uid"], []))
+    ]
+    group_sets_with_counts = [
+        row["name"]
+        for row in api_rows
+        if row["type"] != "CATEGORY" and int(row["data_set_reports"]) != 0
+    ]
+    affected = sum(1 for row in categories if int(row["data_set_reports"]) > 0)
+    results = [
+        (
+            step,
+            PASS if not mismatches and not group_sets_with_counts else FAIL,
+            f"{len(categories)} categories, {affected} with sub-totals"
+            if not mismatches and not group_sets_with_counts
+            else f"mismatches: {mismatches}; group sets with counts: {group_sets_with_counts}",
+        )
+    ]
+    results.append(_data_set_report_tooltip_check(ctx, frame, categories))
+    return results
+
+
+def _data_set_report_tooltip_check(ctx, frame, categories):
+    step = "Hovering a data set report count lists its data sets"
+    target = max(categories, key=lambda row: int(row["data_set_reports"]), default=None)
+    if target is None or int(target["data_set_reports"]) == 0:
+        return (step, SKIP, "no category shows sub-totals in any data set report")
+    row = frame.locator(ui.USAGE_ROW).filter(has_text=target["uid"]).first
+    row.locator(DATA_SET_REPORTS_DETAILS).hover()
+    tooltip = frame.locator(TOOLTIP).first
+    tooltip.wait_for(state="visible", timeout=ui.DEFAULT_TIMEOUT_MS)
+    listed = sorted(
+        item.strip() for item in tooltip.locator("li").all_inner_texts()
+    )
+    _shot(ctx, "02c-data-set-report-tooltip")
+    ctx.page.mouse.move(0, 0)  # close the tooltip before the next flow
+    return (
+        step,
+        PASS if listed == _sql_names(target) else FAIL,
+        f"{target['name']}: {listed}",
+    )
 
 
 def _api_types(api_rows):

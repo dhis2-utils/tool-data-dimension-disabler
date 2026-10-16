@@ -16,7 +16,7 @@ describe('ColumnChooser', () => {
         )
         await user.click(screen.getByRole('button', { name: /Manage view/ }))
         const menu = screen.getByTestId('column-chooser-menu')
-        expect(within(menu).getAllByRole('menuitemcheckbox')).toHaveLength(10)
+        expect(within(menu).getAllByRole('menuitemcheckbox')).toHaveLength(11)
         const typeItem = within(menu).getByRole('menuitemcheckbox', {
             name: /Type/,
         })
@@ -50,7 +50,7 @@ describe('ColumnChooser', () => {
         )
         await user.click(screen.getByRole('button', { name: /Manage view/ }))
 
-        expect(screen.getAllByTestId(/^column-check-/)).toHaveLength(10)
+        expect(screen.getAllByTestId(/^column-check-/)).toHaveLength(11)
         expect(screen.getByTestId('column-check-uid')).toHaveAttribute(
             'data-checked',
             'true'

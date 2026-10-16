@@ -7,6 +7,7 @@ import {
     DataTableColumnHeader,
     DataTableHead,
     DataTableRow,
+    Tooltip,
 } from '@dhis2/ui'
 import React, { useState } from 'react'
 import { UsageRow } from '../hooks/useUsageData'
@@ -48,6 +49,34 @@ const cellClass = (column: ColumnDef): string | undefined => {
         return classes.uid
     }
     return column.numeric ? classes.number : undefined
+}
+
+/** The formatted value, with the column's detail list (if any) in a tooltip. */
+const CellContent = ({ column, row }: { column: ColumnDef; row: UsageRow }) => {
+    const details = column.details?.(row) ?? []
+    if (details.length === 0) {
+        return <>{column.format(row)}</>
+    }
+    return (
+        <Tooltip
+            maxWidth={360}
+            content={
+                <ul className={classes.detailList}>
+                    {details.map((item) => (
+                        <li key={item}>{item}</li>
+                    ))}
+                </ul>
+            }
+        >
+            <span
+                className={classes.hasDetails}
+                data-test={`usage-cell-details-${column.key}`}
+                tabIndex={0}
+            >
+                {column.format(row)}
+            </span>
+        </Tooltip>
+    )
 }
 
 const defaultDirectionFor = (column: SortColumn): SortDirection =>
@@ -168,7 +197,7 @@ export const UsageTable = ({ rows, onDisable }: Props) => {
                                     align={column.align}
                                     className={cellClass(column)}
                                 >
-                                    {column.format(row)}
+                                    <CellContent column={column} row={row} />
                                 </DataTableCell>
                             ))}
                             <DataTableCell className={classes.actionCell}>
