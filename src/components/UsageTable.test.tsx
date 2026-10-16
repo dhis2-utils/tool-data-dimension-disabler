@@ -55,6 +55,10 @@ const bodyRowNames = () =>
         .getAllByTestId('usage-row')
         .map((row) => within(row).getByTestId('usage-row-name').textContent)
 
+// The chooser tests drive a flyout menu with userEvent and take 4-5 s on
+// their own; under a full parallel run they crossed Jest's 5 s default.
+jest.setTimeout(20000)
+
 describe('UsageTable', () => {
     beforeEach(() => {
         window.localStorage.clear()
