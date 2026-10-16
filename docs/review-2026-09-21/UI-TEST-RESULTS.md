@@ -22,13 +22,15 @@ full set (51 files) was delivered to the maintainer separately.
 
 ## Instances
 
-| Label | URL | DHIS2 version | Source |
-|---|---|---|---|
-| 2.40.12 | `http://dhis2-agent-cdd-sl40:8080` | 2.40.12 (rev 82b6022) | broker, seed `dhis2-db-sierra-leone_V40.sql.gz` |
-| 2.41.10 | `http://dhis2-agent-cdd-emis41:8080` | 2.41.10 (rev 1a3484f) | broker, seed `dhis2-edu-meta_2026-07-17_v41.sql.gz` (EMIS, "edu-meta") |
-| 2.42.6 | `http://dhis2-agent-cdd-ehr42:8080` | 2.42.6 (rev dd8bdbb) | broker, seed `dhis2-ehr-meta_2026-07-17_v42.sql.gz` (EHR, "ehr-meta") |
-| 2.43.1 | `http://dhis2-agent-cdd-sl43:8080` | 2.43.1 (rev 9cbfbf3) | broker, seed `dhis2-db-sierra-leone_v43.sql.gz` |
-| 2.43 Laos | `http://dhis2-agent-cdd-lao43:8080` | 2.43.1 (rev 9cbfbf3) | broker, seed `lao_hmis_demo_v43.sql.gz` (Laos HMIS demo, large) |
+All instances were local throwaway instances, one per database.
+
+| Label | DHIS2 version | Database |
+|---|---|---|
+| 2.40.12 | 2.40.12 (rev 82b6022) | Sierra Leone 2.40 demo database |
+| 2.41.10 | 2.41.10 (rev 1a3484f) | DHIS2 for Education (EMIS) metadata snapshot, July 2026 |
+| 2.42.6 | 2.42.6 (rev dd8bdbb) | EHR metadata snapshot, July 2026 |
+| 2.43.1 | 2.43.1 (rev 9cbfbf3) | Sierra Leone 2.43 demo database |
+| 2.43 Laos | 2.43.1 (rev 9cbfbf3) | Laos HMIS demo database (large) |
 
 Test data on both Sierra Leone instances: 23 objects with `dataDimension =
 true` (12 categories, 4 org unit group sets, 5 data element group sets, 2
@@ -91,7 +93,7 @@ data, not a defect.
 | Re-enable each disabled dimension (cleanup) | PASS | PASS | PASS | PASS | PASS | JSON Patch `value: true`, verified by read-back |
 | Remove SQL view returns to the create notice | PASS | PASS | PASS | PASS | PASS | view really deleted (`404`) |
 | Creating the view again restores the table | PASS | PASS | PASS | PASS | PASS | |
-| Data-read error (409 E4312) shows the server message | PASS | **FAIL** | **FAIL** | PASS | **FAIL** | 2.42/Laos screenshots instead show the table — the error state is never reached. **Not an app bug — instance limitation**: on this EMIS seed, `admin` (and the broker's `local_admin`) both hold the `Superuser` role with `ALL`, and `admin` is also the SQL view's owner; DHIS2 grants owners/superusers full access regardless of `sharing.public`, so setting `public: r-------` has no effect when driven as either account and `/data` keeps answering 200. Unlike the Sierra Leone seeds' limited demo `admin`, no standard account on this instance can be denied data read. Confirmed by `GET /api/me` as both `admin` and `local_admin`: both report `authorities: ["ALL"]`. 2.42/Laos: same root cause — `admin` rejects Basic auth outright on both seeds (401), and the only usable account, `local_admin`, also holds `ALL`. Because the flow raised an exception before its own cleanup step, it left the view's sharing at `r-------` on all three; restored to `r-r-----` by hand and verified on each (see STATE-CHANGES.md) |
+| Data-read error (409 E4312) shows the server message | PASS | **FAIL** | **FAIL** | PASS | **FAIL** | 2.42/Laos screenshots instead show the table — the error state is never reached. **Not an app bug — instance limitation**: on this EMIS seed, `admin` (and the separate superuser account) both hold the `Superuser` role with `ALL`, and `admin` is also the SQL view's owner; DHIS2 grants owners/superusers full access regardless of `sharing.public`, so setting `public: r-------` has no effect when driven as either account and `/data` keeps answering 200. Unlike the Sierra Leone seeds' limited demo `admin`, no standard account on this instance can be denied data read. Confirmed by `GET /api/me` as both accounts: both report `authorities: ["ALL"]`. 2.42/Laos: same root cause — `admin` rejects Basic auth outright on both seeds (401), and the only usable account, a separate superuser, also holds `ALL`. Because the flow raised an exception before its own cleanup step, it left the view's sharing at `r-------` on all three; restored to `r-r-----` by hand and verified on each (see STATE-CHANGES.md) |
 | "Remove SQL view" stays available in the error state | PASS | N/A | N/A | PASS | N/A | not reached — the error state above never occurs on this instance |
 | Retry loads the table once access is restored | PASS | N/A | N/A | PASS | N/A | not reached, same reason |
 | Legacy category-only view detected as outdated | PASS | PASS | N/A | PASS | N/A | 2.41 verified with **two** legacy definitions: the suite's synthetic one (`legacy_sql_view.py`) during the automated run, and separately, by hand, the actual historical `sql_view_41` object from `git show 7b8c7e1:src/app.js` (Task 14 step 4). 2.42/Laos: check 2 not run per review plan (already covered on 2.41.10 and, in pass A, on 2.43.1 Sierra Leone) |
@@ -169,8 +171,8 @@ DHIS2 version:
    fails by construction. The filter for that type still works correctly
    (shows 0 rows, as expected).
 2. **The data-read-error scenario cannot be reproduced on this instance
-   with any standard account.** Both `admin` and the broker's `local_admin`
-   hold the `Superuser` role with the `ALL` authority here (unlike the
+   with any standard account.** Both `admin` and the separate superuser
+   account hold the `Superuser` role with the `ALL` authority here (unlike the
    Sierra Leone seeds, whose demo `admin` has neither `ALL` nor
    `F_SQLVIEW_EXECUTE`), and `admin` is also the SQL view's owner. DHIS2
    grants owners and `ALL`-holders full access regardless of an object's
@@ -180,7 +182,7 @@ DHIS2 version:
    /api/me` as `admin` returns `{"id":"M5zQapPyTZI", ...,
    "userRoles":[{"name":"Superuser","authorities":["...","ALL",...]}]}`,
    and the SQL view's `sharing.owner` is the same `M5zQapPyTZI`; `GET
-   /api/me` as `local_admin` returns `authorities: ["ALL"]` too. The two
+   /api/me` as the superuser account returns `authorities: ["ALL"]` too. The two
    downstream steps that depend on reaching the error state ("Remove SQL
    view stays available" and "Retry recovers") were consequently not
    reached and are marked N/A rather than FAIL.
@@ -200,7 +202,7 @@ DHIS2 version:
 Checks 2 (outdated-view detection) and 5 (limited-user permission error)
 were out of scope for this instance per the review plan (check 2 was
 exercised on 2.41.10, check 5 on 2.43.1) — Task 14 step 4 (installing the
-legacy view) was correspondingly not run on `agent-cdd-ehr42`, and the
+legacy view) was correspondingly not run on the 2.42.6 instance, and the
 `outdated-update` and `limited-user` suite flows were excluded via
 `E2E_FLOWS`. All corresponding doc rows are N/A/SKIPPED, not FAIL. Four
 things differ from the "all versions behave the same" pattern above, three
@@ -218,7 +220,7 @@ of them properties of the **EHR ("ehr-meta") seed**:
 2. **The data-read-error scenario is unreachable here too, for a related but
    distinct reason.** This seed's `admin` account rejects Basic auth
    outright (`401`) — it cannot be used at all, unlike the EMIS seed's
-   `admin`. The only usable account, the broker's `local_admin`, holds `ALL`
+   `admin`. The only usable account, a separate superuser, holds `ALL`
    (`GET /api/me` → `authorities: ["ALL"]`), so — same mechanism as
    2.41.10 — setting the view's sharing to `r-------` has no effect and
    `/sqlViews/{id}/data` keeps answering 200. Because `flow_data_error`
@@ -254,7 +256,7 @@ of them properties of the **EHR ("ehr-meta") seed**:
 Checks 2 (outdated-view detection) and 5 (limited-user permission error)
 were out of scope for this instance per the review plan (check 2 was
 exercised on 2.41.10, check 5 on 2.43.1 Sierra Leone) — Task 14 step 4 was
-correspondingly not run on `agent-cdd-lao43`, and the `outdated-update` and
+correspondingly not run on the Laos instance, and the `outdated-update` and
 `limited-user` suite flows were excluded via `E2E_FLOWS`. All corresponding
 doc rows are N/A/SKIPPED, not FAIL. Three things differ from the "all
 versions behave the same" pattern above, all of them properties of the
@@ -272,7 +274,7 @@ versions behave the same" pattern above, all of them properties of the
    group set (3 of 3, not 3 of 4).
 2. **The data-read-error scenario is unreachable here too, same mechanism
    as 2.41.10 and 2.42.6.** This seed's `admin` account rejects Basic auth
-   outright (`401`); the only usable account, the broker's `local_admin`,
+   outright (`401`); the only usable account, a separate superuser,
    holds `ALL` (`GET /api/me` → `authorities: ["ALL"]`), so setting the
    view's sharing to `r-------` has no effect and `/sqlViews/{id}/data`
    keeps answering 200. `flow_data_error` again raised its "waiting for the
@@ -362,8 +364,8 @@ the API. For each instance the installed `sqlQuery` was read back from
   `CATEGORYOPTION_GROUP_SET` row exists at all, because this seed defines no
   objects of either type.
 - 2.43.1 Laos — 120 rows, **0 mismatches** between the API payload and a
-  direct `psql` execution of the installed `sqlQuery` against
-  `dhis2-agent-cdd-lao43-db` (compared uid-by-uid and views-by-views, not
+  direct `psql` execution of the installed `sqlQuery` against the
+  instance's database (compared uid-by-uid and views-by-views, not
   just row counts), and identical to the rendered table. Only 7 rows are
   non-zero: Sex (Male/Female) (Category option group set) 42 (76.4% of
   dimension views, 16.6% of favorite views), ENTO - Reporting institution
@@ -422,13 +424,13 @@ separately.
 The table's columns changed on 2026-09-22 (favorite counts split by sharing,
 a column chooser, header tooltips, no in-app title), so the 2.43.1 usage-table
 screenshot from this review no longer shows the current UI. The table above now
-points at **`2.43-columns.png`**, taken on `agent-cdd-manual` (DHIS2 2.43.1)
+points at **`2.43-columns.png`**, taken on a separate 2.43.1 instance
 with Public, Shared and Private enabled through the Columns chooser;
 `2.43.1-02-table.png` is kept as the record of what this review actually saw.
 The other versions' screenshots are from the 2026-09-21 run and likewise still
 show the older column set.
 
-Re-run of the e2e suite on `agent-cdd-manual` (2.43.1), all flows including
+Re-run of the e2e suite on that 2.43.1 instance, all flows including
 the new `columns-chooser` one: **56 PASS, 2 INFO, 0 FAIL**.
 
 Favorite counts shown in the table, cross-checked against a second,

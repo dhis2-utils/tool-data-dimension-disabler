@@ -2,7 +2,7 @@
 
 Reviewed: 2026-09-21 · Branch `app-platform-migration` ·
 Scope: code review + functional test + architecture assessment ·
-Reviewer: agent (Claude Opus 5, `dhis2-app-review` skill)
+Reviewer: HISP Centre implementation team
 **All five planned instances have now been tested, across four review
 passes (2026-09-21): 2.40.12 (Sierra Leone seed), 2.41.10 (EMIS seed),
 2.42.6 (EHR seed), 2.43.1 (Sierra Leone seed) and 2.43.1 (Laos HMIS demo
@@ -10,8 +10,8 @@ seed, the largest instance in the review).** Pass A (below) covered
 2.40.12 and 2.43.1 Sierra Leone; passes B, C and D (further down) cover
 2.41.10, 2.42.6 and 2.43.1 Laos respectively.
 
-**Update, review pass B (2026-09-21)**: **2.41.10** (`agent-cdd-emis41`, EMIS
-"edu-meta" seed) tested against the rebuilt bundle containing the M1/M2/L1/L3
+**Update, review pass B (2026-09-21)**: **2.41.10** (DHIS2 for Education
+(EMIS) metadata) tested against the rebuilt bundle containing the M1/M2/L1/L3
 –L6 fixes below. Full results in `docs/review-2026-09-21/UI-TEST-RESULTS.md`.
 M1 is confirmed fixed live (three dimensions disabled in succession, three
 toasts, no alternation). No new app defect was found; one new LOW finding
@@ -20,12 +20,12 @@ the `limited-user` flow excluded. Two suite steps fail on this instance for
 reasons that are properties of the EMIS seed, not the app — see
 `UI-TEST-RESULTS.md` "2.41.10-specific notes" for the full explanation:
 the seed defines zero `categoryOptionGroupSets`, and both `admin` and
-`local_admin` hold `ALL` here (unlike the Sierra Leone seeds), so the
+the superuser account hold `ALL` here (unlike the Sierra Leone seeds), so the
 data-read-denied scenario cannot be reproduced on this instance with any
 standard account.
 
-**Update, review pass C (2026-09-21)**: **2.42.6** (`agent-cdd-ehr42`, EHR
-"ehr-meta" seed) tested against the same fix-wave bundle, functional checks
+**Update, review pass C (2026-09-21)**: **2.42.6** (EHR metadata
+snapshot) tested against the same fix-wave bundle, functional checks
 1, 3, 4, 6, 7, 8, 9 only (checks 2 and 5 do not apply to this instance — see
 `UI-TEST-RESULTS.md` "2.42.6-specific notes"). **Check 7 (global shell) is
 confirmed live for the first time on the version that introduces it**: the
@@ -39,18 +39,18 @@ of `<`, `(`, `,` inside names, e.g. `"Age(<1 Yr, 50+Yrs)"`) are the first in
 this review to expose the divergence. Two suite steps fail on this instance
 for reasons that are properties of the EHR seed, not the app: it defines
 zero `dataElementGroupSets` and zero `categoryOptionGroupSets` at all, and
-`local_admin` (the only account that can drive this seed) holds `ALL`, so
+the superuser account (the only account that can drive this seed) holds `ALL`, so
 the data-read-denied scenario is unreachable here too, same root cause as
 on 2.41.10.
 
 **Update, review pass D (2026-09-21, final pass)**: **2.43.1 Laos**
-(`agent-cdd-lao43`, Laos HMIS demo seed) tested against the same fix-wave
+(Laos HMIS demo database) tested against the same fix-wave
 bundle, functional checks 1, 3, 4, 6, 7, 8, 9 only (checks 2 and 5 out of
 scope, same reasoning as pass C — see `UI-TEST-RESULTS.md` "2.43.1
 Laos-specific notes"). This is by far the largest instance in the review
 (120 enabled dimensions, 2,942 favorites across visualizations, maps and
-event visualizations), and the response-time measurement asked for in the
-task brief was taken here: three direct `curl -w '%{time_total}'` runs
+event visualizations), and the response-time measurement planned for the
+review was taken here: three direct `curl -w '%{time_total}'` runs
 against `/api/sqlViews/GOLswS44mh8/data?paging=false` returned **0.220577s,
 0.112248s, 0.107094s** (120 rows — the largest table measured in this
 review, still comfortably fast). No new app defect was found. M1 is
@@ -61,7 +61,7 @@ fails again for the same reason as **L10** (reproduced on a fourth seed,
 6 of 120 rows affected, not a new finding), and the same two instance/seed
 limitations already documented on 2.41.10/2.42.6 recur: this seed defines
 zero `dataElementGroupSets`, and the data-read-denied scenario is
-unreachable because the only usable account (`local_admin`) holds `ALL`.
+unreachable because the only usable account (a superuser) holds `ALL`.
 The counts the app shows were cross-checked directly against the database
 with `psql`: all 120 rows match the API and the rendered table exactly,
 uid-by-uid and views-by-views, with 0 mismatches.
@@ -131,8 +131,8 @@ Finding disposition:
 No new app-code defects were found in passes B, C or D. Every suite FAIL
 across all five instances beyond M1 (before its fix) traces to either a
 seed's own metadata shape (e.g. a seed defining zero objects of one or two
-dimension types), an account's authorities (the broker's `local_admin`
-holds `ALL`, so the data-read-denied scenario can only be exercised on the
+dimension types), an account's authorities (the superuser account used
+on those databases holds `ALL`, so the data-read-denied scenario can only be exercised on the
 Sierra Leone seeds' more limited demo `admin`), or the two test-suite gaps
 above — never to the app itself.
 
@@ -188,7 +188,7 @@ None.
   developers and reviewers at.
   1. The filter `categoryDimensions:!empty` is rejected by 2.40 with
      `400 E1003 "!empty is not a valid operator"` (verified on
-     `agent-cdd-sl40`; it works on 2.43). The `|| true` on the same line
+     the Sierra Leone 2.40.12 demo database; it works on 2.43). The `|| true` on the same line
      swallows the error, so the script reports success and silently records
      **zero** `VISUALIZATION_VIEW` events on 2.40 — exactly the event type the
      ranking is mostly built from.
@@ -276,7 +276,7 @@ None.
   (`_ensure_limited_user` / `flow_limited_user`) always deletes the SQL view
   before returning, so `restore-view` reliably finds the MISSING notice and
   recreates the view. When `limited-user` is excluded from `E2E_FLOWS` (as
-  review pass B did on `agent-cdd-emis41`, since that check was already
+  review pass B did on the 2.41.10 EMIS instance, since that check was already
   covered on 2.43.1) and the preceding `outdated-update` step already leaves
   the view installed and `READY`, `restore-view` opens the app straight to
   the usage table — no notice box ever appears — and `notice_title()` times
@@ -313,7 +313,7 @@ None.
   49Yrs,50+Yrs)", undefined, {sensitivity: "base"})` returns `-1`, i.e. the
   app's displayed order is the *correct* `localeCompare` order; the
   suite's Python comparator is simply the wrong oracle for this seed's data.
-  Reproduced live on `agent-cdd-ehr42` (2.42.6): `disable-per-type`'s
+  Reproduced live on the 2.42.6 EHR instance: `disable-per-type`'s
   "Sort by name ascending/descending" steps FAIL while the on-screen order
   is demonstrably right. Fix (test suite, not app code): reimplement the
   expected order with the same comparator the app uses — either compare
@@ -323,8 +323,8 @@ None.
   as ≤ under the same rule the row values were shown in"). Left undone — no
   source or script under `src/`/`scripts/` is affected.
 
-  **Reproduced again, review pass D (2026-09-21), `agent-cdd-lao43`
-  (2.43.1, Laos HMIS demo seed)**: 6 of 120 rows disagree between Python's
+  **Reproduced again, review pass D (2026-09-21), Laos HMIS demo database
+  on 2.43.1**: 6 of 120 rows disagree between Python's
   `sorted(key=str.lower)` and Node's `localeCompare` (same names class as
   before — `<`, `(`, `,` and digits, e.g. `sorted()` orders `"Age
   (0-59,60+)"` before `"Age (<1- 30+ years)"`; `localeCompare` orders them
@@ -359,7 +359,7 @@ None.
   `display: none` with a 0×0 box inside the shell, the shell's header is 40 px
   tall, and a full-page screenshot shows one header. The suite therefore counts
   *visible* headers (`e2e/app_driver.py:header_bar_count`).
-- **Claim** (task brief, check 2): after the update the view's `sharing.public`
+- **Claim** (review plan, check 2): after the update the view's `sharing.public`
   should be `r-------`.
   **Refuted by**: the approved design (§4) and the server — with `r-------`
   the data endpoint answers `409 E4312` even for the creating admin (verified
@@ -433,7 +433,7 @@ What remains (none of it architectural):
   different metadata shapes.
 - The seeds' `admin` is not a full superuser (no `ALL`, no
   `F_SQLVIEW_EXECUTE`), so creating the throwaway limited user for the
-  permission test needs the broker's `local_admin` account. The e2e suite takes
+  permission test needs a separate superuser account. The e2e suite takes
   it through `E2E_SUPERUSER`/`E2E_SUPERPASS`.
 - The instances are served over plain http, so the platform's PWA layer logs
   "not a secure context" errors on every load. They are filtered as platform
@@ -445,7 +445,7 @@ instance is the large, differently-shaped seed the first gap called for,
 and its response time was measured three times as requested (102–220 ms for
 120 rows). The remaining environment property worth noting for future
 passes: on every non-Sierra-Leone seed tested (EMIS, EHR, Laos), the only
-account that can drive the seed at all (`local_admin`) holds `ALL`, so the
+account that can drive the seed at all (a superuser) holds `ALL`, so the
 data-read-denied scenario (design §6) can only ever be exercised on the
 Sierra Leone seeds' demo `admin` — this is now a settled, understood
-limitation of the broker seeds rather than an open gap.
+limitation of those demo databases rather than an open gap.
